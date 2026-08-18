@@ -250,7 +250,9 @@ No failure is silent, and no failure is reported without its reason.
 | No image on clipboard | 2 | Distinct beep, nothing typed. Explicitly not a no-op — an unresponsive hotkey is indistinguishable from a broken one. |
 | SSH unreachable / auth failure | 4 | ssh's own stderr appended to `%LOCALAPPDATA%\clipbridge\clipbridge.log`; error beep; nothing typed. |
 | Non-PNG or empty stdin | 3 | Receiver writes the reason to stderr; ssh relays it into the same log. |
-| Receiver cannot write `~/.clipbridge` | 5 | Reason logged; error beep; nothing typed. |
+| Receiver cannot write `~/.clipbridge` | 5 | Reason logged; error beep; nothing typed. Also covers a failed `cat > $tmp` write and a failed final `chmod`/`mv` — any local write failure on the receiver side. |
+| Cannot write the local temp PNG | 7 | Raised before ssh is ever invoked, so the failure is provably local. Scoped by call site rather than exception type: `UnauthorizedAccessException` does not derive from `IOException`, so a type filter would miss permission denials. |
+| Configuration problem | 8 | Missing or malformed `config.json`, unknown transport, blank `sshHost`. Split out from 4 because a first run before `Install-Clipbridge.ps1` was reporting "ssh failed" for a purely local problem, sending debugging at the network. |
 | Receiver printed no path / unparseable | 6 | Logged; error beep; nothing typed. The image may exist on the far side; the log records the raw stdout so it can be recovered. |
 | Hotkey pressed with a non-terminal focused | — | `Ctrl+V` is scoped to the terminal, so this only applies to the unscoped `Ctrl+Shift+V` force binding. The path is typed into whatever has focus: visible, harmless, and recoverable — the file still exists and `last-path.txt` still holds its path. |
 | Clipboard holds text, not an image | — | Ordinary paste. `Ctrl+V` behaves exactly as it did before clipbridge existed. |
