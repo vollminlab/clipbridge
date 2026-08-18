@@ -142,6 +142,26 @@ Describe 'Write-ClipbridgeLog' {
         $line | Should -Match 'ssh exploded'
         Remove-Item -Recurse -Force $dir
     }
+
+    It 'drops lines older than 7 days and keeps fresh ones' {
+        $dir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid())
+        New-Item -ItemType Directory -Path $dir | Out-Null
+        $logPath = Join-Path $dir 'clipbridge.log'
+        $staleStamp = (Get-Date).AddDays(-10).ToString('yyyy-MM-ddTHH:mm:ss')
+        $freshStamp = (Get-Date).AddDays(-1).ToString('yyyy-MM-ddTHH:mm:ss')
+        Set-Content -Path $logPath -Value @(
+            "$staleStamp  old event",
+            "$freshStamp  recent event"
+        )
+
+        Write-ClipbridgeLog -ConfigDir $dir -Message 'new event'
+
+        $text = (Get-Content $logPath) -join "`n"
+        $text | Should -Not -Match 'old event'
+        $text | Should -Match 'recent event'
+        $text | Should -Match 'new event'
+        Remove-Item -Recurse -Force $dir
+    }
 }
 
 Describe 'Test-RemotePath' {
@@ -161,5 +181,25 @@ Describe 'Test-RemotePath' {
     }
     It 'rejects multi-line output' {
         Test-RemotePath "/home/vollmin/.clipbridge/x.png`n/another/line" | Should -BeFalse
+    }
+    It 'rejects a non-ASCII path, which Set-Content -Encoding ASCII would silently mangle' {
+        Test-RemotePath "/home/vollmin/.clipbridge/caf$([char]0xE9)-x.png" | Should -BeFalse
+    }
+    It 'rejects a path containing a control character' {
+        Test-RemotePath "/home/vollmin/.clipbridge/x$([char]0x07).png" | Should -BeFalse
+    }
+}
+
+Describe 'Get-NonBlankLines' {
+    It 'returns exactly one element for well-formed single-line output' {
+        Get-NonBlankLines "/home/vollmin/.clipbridge/x.png`n" | Should -HaveCount 1
+    }
+    It 'returns every non-blank line, so a second line is never silently discarded' {
+        $lines = Get-NonBlankLines "/home/vollmin/.clipbridge/x.png`n/another/line`n"
+        $lines | Should -HaveCount 2
+        $lines[1] | Should -Be '/another/line'
+    }
+    It 'drops blank lines' {
+        Get-NonBlankLines "`n/home/vollmin/.clipbridge/x.png`n`n" | Should -HaveCount 1
     }
 }

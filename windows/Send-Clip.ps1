@@ -7,7 +7,7 @@
     and writes the returned remote path to last-path.txt for clipbridge.ahk.
     Exit codes: 0 ok | 2 no image | 3 remote rejected input | 4 ssh failed
                 5 remote cannot write | 6 no usable path returned
-                7 cannot write local temp file
+                7 cannot write local temp file | 8 configuration problem
 #>
 [CmdletBinding()]
 param(
@@ -95,20 +95,52 @@ function Write-ClipbridgeLog {
         [Parameter(Mandatory)][string] $Message
     )
     if (-not (Test-Path $ConfigDir)) { New-Item -ItemType Directory -Path $ConfigDir -Force | Out-Null }
-    $stamp = (Get-Date).ToString('yyyy-MM-ddTHH:mm:ss')
-    Add-Content -Path (Join-Path $ConfigDir 'clipbridge.log') -Value "$stamp  $Message"
+    $logPath = Join-Path $ConfigDir 'clipbridge.log'
+    $stamp   = (Get-Date).ToString('yyyy-MM-ddTHH:mm:ss')
+    $line    = "$stamp  $Message"
+
+    # Capped at 7 days, same rule as the images (design spec). Each line starts with
+    # a fixed-width, sortable yyyy-MM-ddTHH:mm:ss stamp, so a plain lexical string
+    # compare against a cutoff stamp reproduces chronological order - this is a
+    # filter, not a parse, which matters because it runs on every hotkey press.
+    $cutoff = (Get-Date).AddDays(-7).ToString('yyyy-MM-ddTHH:mm:ss')
+    $kept = @()
+    if (Test-Path $logPath) {
+        $kept = @(Get-Content $logPath | Where-Object { $_.Length -ge 19 -and $_.Substring(0, 19) -ge $cutoff })
+    }
+    $kept += $line
+    Set-Content -Path $logPath -Value $kept
 }
 
 function Test-RemotePath {
     param([string] $Path)
     if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
-    # One line, absolute, no whitespace: the path is typed unquoted into a prompt,
-    # so anything else is not safe to hand to SendText.
+    # One line, absolute, printable ASCII only: the path is typed unquoted into a
+    # prompt, so anything else is not safe to hand to SendText.
+    # \x21-\x7E excludes space (0x20), C0 control characters (below 0x21, e.g. a
+    # bell or embedded CR), and anything non-ASCII. Rejecting non-ASCII here matters:
+    # Set-Content -Encoding ASCII on last-path.txt below does not throw on a
+    # non-ASCII character, it silently substitutes '?' - so a path like
+    # '/home/x/café.png' would otherwise pass validation and then get corrupted
+    # on write with no error and no log line. The fix belongs at validation, not by
+    # widening the encoding: the path is genuinely meant to be ASCII, and widening
+    # would only move the same mismatch into the not-yet-written AHK side, which
+    # would then need a matching encoding for FileRead.
     # \z (absolute end of string), not $: .NET regex's $ matches either the true end
     # of the string OR just before a single trailing newline - so a path with one bare
     # trailing newline would otherwise slip past this check even though it is not a
     # clean single line. \z has no such exception.
-    return ($Path -match '^/[^\s]+\z')
+    return ($Path -match '^/[\x21-\x7E]+\z')
+}
+
+function Get-NonBlankLines {
+    param([string] $Text)
+    # A separate, testable step: the main body used to fold this straight into
+    # 'Select-Object -First 1', which silently discarded any line past the first.
+    # The receiver emits exactly one line today, but nothing enforces that, and
+    # this file's discipline is that no failure is silent - so the main body checks
+    # this array's Count itself rather than only ever seeing the first element.
+    return @(($Text -split "`n") | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 }
 
 if ($DotSourceOnly) { return }
@@ -131,7 +163,21 @@ try {
     }
     if (-not $saved) { exit 2 }   # no image: not an error
 
-    $cfg = Get-ClipbridgeConfig -ConfigDir $ConfigDir
+    # Scoped narrowly around just the config read, for the same reason as the
+    # Save-ClipboardPng try above: a missing/invalid config.json, an unknown
+    # transport, or a blank sshHost is a local configuration problem, not a
+    # transport failure. Before this, all four landed in the generic catch below
+    # as exit 4 ("ssh failed") - a first run before Install-Clipbridge.ps1 has ever
+    # executed would log "unhandled: clipbridge config not found..." under the ssh
+    # failure code, sending debugging in the wrong direction. Get-ClipbridgeConfig's
+    # own throw messages already name the specific cause (and, for a missing or
+    # malformed file, the path), so nothing further is needed here to satisfy that.
+    try {
+        $cfg = Get-ClipbridgeConfig -ConfigDir $ConfigDir
+    } catch {
+        Write-ClipbridgeLog -ConfigDir $ConfigDir -Message "configuration problem: $($_.Exception.Message)"
+        exit 8
+    }
     $inv = Get-SshInvocation -Transport $cfg.transport -SshHost $cfg.sshHost
 
     $out = Join-Path ([System.IO.Path]::GetTempPath()) 'clipbridge-xfer.out'
@@ -154,13 +200,23 @@ try {
         exit 4
     }
 
-    $remote = ($stdout -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -First 1)
+    $lines = Get-NonBlankLines -Text $stdout
+    if ($lines.Count -ne 1) {
+        Write-ClipbridgeLog -ConfigDir $ConfigDir -Message "receiver returned $($lines.Count) non-blank line(s), expected exactly 1: '$stdout'"
+        exit 6
+    }
+    $remote = $lines[0]
     if (-not (Test-RemotePath $remote)) {
         Write-ClipbridgeLog -ConfigDir $ConfigDir -Message "unusable path from receiver: '$stdout'"
         exit 6
     }
 
     if (-not (Test-Path $ConfigDir)) { New-Item -ItemType Directory -Path $ConfigDir -Force | Out-Null }
+    # last-path.txt is only safe to read after this process has exited: Set-Content
+    # truncates then writes, so the file is briefly empty mid-write, and this write
+    # completes before the exit 0 below. clipbridge.ahk must launch this script with
+    # RunWait (which blocks until the process exits), never a poll loop that could
+    # observe the file mid-truncation.
     Set-Content -Path (Join-Path $ConfigDir 'last-path.txt') -Value $remote -NoNewline -Encoding ASCII
     exit 0
 }
