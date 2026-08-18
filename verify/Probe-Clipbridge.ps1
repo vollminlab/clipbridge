@@ -92,11 +92,11 @@ foreach ($c in $candidates) {
         Write-Info "$($c.Exe) not found on PATH"
         continue
     }
-    $args = $c.Prefix + @('-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', $SshHost, 'echo clipbridge-ok')
+    $sshArgs = $c.Prefix + @('-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', $SshHost, 'echo clipbridge-ok')
     $out  = Join-Path $env:TEMP "clipbridge-probe-$($c.Name).out"
     $err  = Join-Path $env:TEMP "clipbridge-probe-$($c.Name).err"
 
-    $p = Start-Process -FilePath $c.Exe -ArgumentList $args -NoNewWindow -Wait -PassThru `
+    $p = Start-Process -FilePath $c.Exe -ArgumentList $sshArgs -NoNewWindow -Wait -PassThru `
                        -RedirectStandardOutput $out -RedirectStandardError $err
     $stdout = (Get-Content $out -Raw -ErrorAction SilentlyContinue)
 
@@ -120,11 +120,11 @@ Write-Section '4. Binary integrity over ssh stdin'
 
 # This is the production mechanism verbatim: -RedirectStandardInput takes a FILE PATH,
 # so the bytes never pass through a PowerShell pipe (which would corrupt them).
-$args = $working.Prefix + @($SshHost, "cat > $RemoteTmp && sha256sum $RemoteTmp | cut -d' ' -f1")
+$sshArgs = $working.Prefix + @($SshHost, "cat > $RemoteTmp && sha256sum $RemoteTmp | cut -d' ' -f1")
 $out  = Join-Path $env:TEMP 'clipbridge-probe-xfer.out'
 $err  = Join-Path $env:TEMP 'clipbridge-probe-xfer.err'
 
-$p = Start-Process -FilePath $working.Exe -ArgumentList $args -NoNewWindow -Wait -PassThru `
+$p = Start-Process -FilePath $working.Exe -ArgumentList $sshArgs -NoNewWindow -Wait -PassThru `
                    -RedirectStandardInput $localPng -RedirectStandardOutput $out -RedirectStandardError $err
 
 $remoteHash = ((Get-Content $out -Raw -ErrorAction SilentlyContinue) -replace '\s', '').ToLower()
