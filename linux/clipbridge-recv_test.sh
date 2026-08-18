@@ -91,5 +91,30 @@ if [ "$rc" -eq 5 ]; then pass "unwritable parent directory exits 5"; else fail "
 if grep -q "cannot create" "$SANDBOX/err"; then pass "unwritable parent directory explains itself"; else fail "unwritable parent directory gave no reason: $(cat "$SANDBOX/err")"; fi
 cleanup_sandbox
 
+# --- same-second collision gets a suffix, does not overwrite -----------------
+new_sandbox
+make_png_sig "$SANDBOX/in.png"
+# Freeze the clock so both writes land in the same second.
+STUBS="$SANDBOX/stubs"; mkdir -p "$STUBS"
+printf '#!/bin/sh\necho 20260818-041500\n' > "$STUBS/date"
+chmod +x "$STUBS/date"
+OLD_PATH="$PATH"; PATH="$STUBS:$PATH"; export PATH
+
+first=$("$RECV" < "$SANDBOX/in.png")
+printf 'DIFFERENT-CONTENT' >> "$SANDBOX/in.png"
+second=$("$RECV" < "$SANDBOX/in.png")
+
+PATH="$OLD_PATH"; export PATH
+
+if [ "$first" != "$second" ]; then pass "collision produces a distinct path"; else fail "collision reused the same path: $first"; fi
+case "$second" in
+    *-2.png) pass "collision suffix is -2" ;;
+    *)       fail "collision suffix wrong: $second" ;;
+esac
+if [ -f "$first" ] && [ -f "$second" ]; then pass "both files survive a collision"; else fail "a collision destroyed one of the files"; fi
+count=$(ls -1 "$CLIPBRIDGE_DIR"/*.png | wc -l)
+if [ "$count" -eq 2 ]; then pass "collision leaves exactly 2 files"; else fail "collision left $count files, want 2"; fi
+cleanup_sandbox
+
 echo
 if [ "$FAILED" -eq 0 ]; then echo "all tests passed"; exit 0; else echo "$FAILED test(s) failed"; exit 1; fi

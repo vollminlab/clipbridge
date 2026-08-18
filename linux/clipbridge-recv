@@ -41,7 +41,13 @@ cat > "$tmp" || die "cannot write $tmp" 5
 magic=$(od -An -tx1 -N8 "$tmp" | tr -d ' \n')
 [ "$magic" = "89504e470d0a1a0a" ] || die "not a PNG (magic=$magic)" 3
 
-path="$CLIP_DIR/$(date +%Y%m%d-%H%M%S).png"
+base=$(date +%Y%m%d-%H%M%S)
+path="$CLIP_DIR/$base.png"
+n=2
+while [ -e "$path" ]; do
+    path="$CLIP_DIR/$base-$n.png"
+    n=$((n + 1))
+done
 
 chmod 600 "$tmp" || die "cannot chmod incoming file" 5
 mv "$tmp" "$path" || die "cannot move incoming file into place" 5
