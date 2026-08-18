@@ -74,7 +74,7 @@ function Save-ClipboardPng {
         # device-independent bitmap and flattens transparency to black.
         $stream = $dobj.GetData('PNG')
         $fs = [System.IO.File]::Create($Path)
-        try { $stream.Position = 0; $stream.CopyTo($fs) } finally { $fs.Dispose() }
+        try { $stream.Position = 0; $stream.CopyTo($fs) } finally { $fs.Dispose(); $stream.Dispose() }
         return $Path
     }
 

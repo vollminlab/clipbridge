@@ -83,4 +83,51 @@ Describe 'Save-ClipboardPng' {
             Should -Be @(0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A)
         Remove-Item $out -Force
     }
+
+    # $env:OS, not $IsWindows: $IsWindows is a PS6+ automatic variable and does not
+    # exist under Windows PowerShell 5.1, which is what CI's Pester job actually runs
+    # (`shell: powershell` on windows-latest - see the workflow). There, referencing
+    # the undefined $IsWindows silently yields $null, so '-Skip:(-not $IsWindows)'
+    # would evaluate true and skip the test forever even in real CI - the opposite of
+    # the point of gating it. $env:OS is 'Windows_NT' on every Windows PowerShell
+    # edition and unset elsewhere, so it works under both 5.1 and pwsh Core.
+    #
+    # This is a real round trip, not a mock of the fallback itself: it puts a real
+    # bitmap on the live clipboard via Clipboard.SetImage, mocks only
+    # Get-ClipboardDataObject (forcing GetDataPresent('PNG') false so the DIB branch
+    # runs), then asserts the file Save-ClipboardPng wrote is a valid PNG with the
+    # right pixel dimensions. A wrong path, wrong ImageFormat, or a swallowed
+    # exception in that branch would fail this for real on a Windows runner.
+    It 'falls back to Clipboard.GetImage() and PNG-encodes it when no PNG stream is present' -Skip:($env:OS -ne 'Windows_NT') {
+        Add-Type -AssemblyName System.Windows.Forms
+        Add-Type -AssemblyName System.Drawing
+        $bmp = New-Object System.Drawing.Bitmap 4, 3
+        for ($x = 0; $x -lt $bmp.Width; $x++) {
+            for ($y = 0; $y -lt $bmp.Height; $y++) {
+                $bmp.SetPixel($x, $y, [System.Drawing.Color]::FromArgb(255, 200, 100, 50))
+            }
+        }
+        [System.Windows.Forms.Clipboard]::SetImage($bmp)
+        $bmp.Dispose()
+
+        Mock -CommandName Get-ClipboardDataObject -MockWith {
+            $o = New-Object psobject
+            $o | Add-Member ScriptMethod GetDataPresent { param($f) $false } -PassThru
+        }
+
+        $out = Join-Path ([System.IO.Path]::GetTempPath()) 'clipbridge-test-dib.png'
+        Save-ClipboardPng -Path $out | Should -Be $out
+
+        $bytes = [System.IO.File]::ReadAllBytes($out)
+        $bytes[0..7] | Should -Be @(0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A)
+
+        $loaded = [System.Drawing.Bitmap]::FromFile($out)
+        try {
+            $loaded.Width  | Should -Be 4
+            $loaded.Height | Should -Be 3
+        } finally {
+            $loaded.Dispose()
+        }
+        Remove-Item $out -Force
+    }
 }
