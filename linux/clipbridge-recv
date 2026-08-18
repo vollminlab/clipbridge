@@ -60,12 +60,31 @@ chmod 600 "$tmp" || die "cannot chmod incoming file" 5
 mv "$tmp" "$path" || die "cannot move incoming file into place" 5
 trap - EXIT INT TERM
 
-# Both bounds, every run. A burst should not be retained for a week, and a
-# single screenshot should not live forever.
+# Both bounds, every run. A burst should not be retained for close to a
+# week, and a single screenshot should not live forever.
+#
+# Assumes only this script ever writes into CLIP_DIR, same as the TOCTOU
+# note above. ls -1t emits one filename per line, so a name containing an
+# embedded newline splits into fragments here and the later `rm -f`
+# silently no-ops on each fragment -- the file survives pruning. Not
+# reachable through the wire protocol (stdin carries a PNG, never a
+# filename) and this script only ever generates names matching
+# [0-9]{8}-[0-9]{6}(-[0-9]+)?.png, so this only matters if something other
+# than this script drops an oddly-named file into CLIP_DIR. Spaces and
+# backslashes are handled correctly by `IFS= read -r`; newlines are not.
 ls -1t "$CLIP_DIR"/*.png 2>/dev/null | tail -n "+$((KEEP_COUNT + 1))" | while IFS= read -r old; do
     rm -f "$old"
 done
 # -exec ... \; rather than + : busybox find does not reliably support +.
+# This path does not share the newline-splitting flaw above -- find -exec
+# passes each match to rm intact, one invocation per file, regardless of
+# what characters the name contains.
+#
+# -mtime +N matches files whose age is at least N+1 whole days: find
+# truncates each file's age to an integer day count before comparing, so
+# a file has to cross that next whole-day boundary to match. With
+# KEEP_DAYS=7 a file 7.99 days old still survives and one 8.01 days old
+# gets pruned -- so KEEP_DAYS=7 actually retains for close to 8 days, not 7.
 find "$CLIP_DIR" -maxdepth 1 -name '*.png' -mtime "+$KEEP_DAYS" -exec rm -f {} \; 2>/dev/null
 
 echo "$path"
