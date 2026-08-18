@@ -1,0 +1,36 @@
+#!/bin/sh
+# clipbridge-recv - read a PNG on stdin, store it, print its absolute path.
+#
+# Storage only. Targeting is the laptop's job: focus is knowable there and
+# unknowable here. See docs/superpowers/specs/clipbridge-design.md.
+#
+# Exit codes: 0 ok | 3 bad input | 5 cannot write
+set -u
+
+CLIP_DIR="${CLIPBRIDGE_DIR:-$HOME/.clipbridge}"
+
+die() { echo "clipbridge: $1" >&2; exit "$2"; }
+
+mkdir -p "$CLIP_DIR" 2>/dev/null || die "cannot create $CLIP_DIR" 5
+chmod 700 "$CLIP_DIR" 2>/dev/null || die "cannot chmod $CLIP_DIR" 5
+[ -w "$CLIP_DIR" ] || die "cannot write $CLIP_DIR" 5
+
+tmp=$(mktemp "$CLIP_DIR/.incoming.XXXXXX") || die "cannot create temp file in $CLIP_DIR" 5
+trap 'rm -f "$tmp"' EXIT INT TERM
+
+# Write stdin out first, then inspect the file. Peeking at the stream would
+# consume the bytes we still need.
+cat > "$tmp"
+
+[ -s "$tmp" ] || die "empty input" 3
+
+magic=$(od -An -tx1 -N8 "$tmp" | tr -d ' \n')
+[ "$magic" = "89504e470d0a1a0a" ] || die "not a PNG (magic=$magic)" 3
+
+path="$CLIP_DIR/$(date +%Y%m%d-%H%M%S).png"
+
+chmod 600 "$tmp" || die "cannot chmod incoming file" 5
+mv "$tmp" "$path" || die "cannot move incoming file into place" 5
+trap - EXIT INT TERM
+
+echo "$path"
