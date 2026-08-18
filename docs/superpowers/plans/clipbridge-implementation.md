@@ -544,7 +544,11 @@ param(
     # when -ConfigDir is supplied and even when -DotSourceOnly returns immediately.
     # The unguarded form throws at bind time and blocks every test on this box.
     # On Windows $env:LOCALAPPDATA is always set, so behavior there is unchanged.
-    [string] $ConfigDir     = $(if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'clipbridge' } else { 'clipbridge' }),
+    # The fallback is ABSOLUTE on purpose: a relative one would not error, it would
+    # silently create clipbridge/ in whatever the process's working directory happens
+    # to be -- System32 for a scheduled task -- and write there while the user checks
+    # %LOCALAPPDATA% and finds nothing.
+    [string] $ConfigDir     = $(if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'clipbridge' } else { Join-Path $HOME '.clipbridge' }),
     [switch] $DotSourceOnly
 )
 
