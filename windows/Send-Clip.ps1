@@ -7,6 +7,7 @@
     and writes the returned remote path to last-path.txt for clipbridge.ahk.
     Exit codes: 0 ok | 2 no image | 3 remote rejected input | 4 ssh failed
                 5 remote cannot write | 6 no usable path returned
+                7 cannot write local temp file
 #>
 [CmdletBinding()]
 param(
@@ -88,4 +89,85 @@ function Save-ClipboardPng {
     return $Path
 }
 
+function Write-ClipbridgeLog {
+    param(
+        [Parameter(Mandatory)][string] $ConfigDir,
+        [Parameter(Mandatory)][string] $Message
+    )
+    if (-not (Test-Path $ConfigDir)) { New-Item -ItemType Directory -Path $ConfigDir -Force | Out-Null }
+    $stamp = (Get-Date).ToString('yyyy-MM-ddTHH:mm:ss')
+    Add-Content -Path (Join-Path $ConfigDir 'clipbridge.log') -Value "$stamp  $Message"
+}
+
+function Test-RemotePath {
+    param([string] $Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+    # One line, absolute, no whitespace: the path is typed unquoted into a prompt,
+    # so anything else is not safe to hand to SendText.
+    # \z (absolute end of string), not $: .NET regex's $ matches either the true end
+    # of the string OR just before a single trailing newline - so a path with one bare
+    # trailing newline would otherwise slip past this check even though it is not a
+    # clean single line. \z has no such exception.
+    return ($Path -match '^/[^\s]+\z')
+}
+
 if ($DotSourceOnly) { return }
+
+# --------------------------- main -----------------------------------------
+$tmpPng = Join-Path ([System.IO.Path]::GetTempPath()) ('clipbridge-{0}.png' -f ([guid]::NewGuid().ToString('N')))
+try {
+    # Scoped narrowly around just the local clipboard-to-file step: everything in this
+    # block runs before ssh is ever invoked, so any exception here is a local failure
+    # (clipboard access, disk full, permissions, bad temp path) - never a transport
+    # problem. Distinguishing it from the generic catch below (exit 4, documented as
+    # "ssh failed") matters because behind a hotkey the only feedback is a beep; exit 4
+    # would send whoever's debugging looking at ssh/network when the real fault never
+    # left the laptop.
+    try {
+        $saved = Save-ClipboardPng -Path $tmpPng
+    } catch {
+        Write-ClipbridgeLog -ConfigDir $ConfigDir -Message "cannot write local temp file $tmpPng - $($_.Exception.Message)"
+        exit 7
+    }
+    if (-not $saved) { exit 2 }   # no image: not an error
+
+    $cfg = Get-ClipbridgeConfig -ConfigDir $ConfigDir
+    $inv = Get-SshInvocation -Transport $cfg.transport -SshHost $cfg.sshHost
+
+    $out = Join-Path ([System.IO.Path]::GetTempPath()) 'clipbridge-xfer.out'
+    $err = Join-Path ([System.IO.Path]::GetTempPath()) 'clipbridge-xfer.err'
+
+    # -RedirectStandardInput takes a FILE PATH, so the bytes never pass through a
+    # PowerShell pipe. A pipe would stringify them and corrupt the image.
+    $p = Start-Process -FilePath $inv.Exe -ArgumentList $inv.Arguments `
+                       -RedirectStandardInput $tmpPng `
+                       -RedirectStandardOutput $out -RedirectStandardError $err `
+                       -NoNewWindow -Wait -PassThru
+
+    $stdout = (Get-Content $out -Raw -ErrorAction SilentlyContinue)
+    $stderr = (Get-Content $err -Raw -ErrorAction SilentlyContinue)
+
+    if ($p.ExitCode -ne 0) {
+        Write-ClipbridgeLog -ConfigDir $ConfigDir -Message "ssh exit $($p.ExitCode): $stderr"
+        # 3 and 5 come from clipbridge-recv; anything else is a transport failure.
+        if ($p.ExitCode -in @(3, 5)) { exit $p.ExitCode }
+        exit 4
+    }
+
+    $remote = ($stdout -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -First 1)
+    if (-not (Test-RemotePath $remote)) {
+        Write-ClipbridgeLog -ConfigDir $ConfigDir -Message "unusable path from receiver: '$stdout'"
+        exit 6
+    }
+
+    if (-not (Test-Path $ConfigDir)) { New-Item -ItemType Directory -Path $ConfigDir -Force | Out-Null }
+    Set-Content -Path (Join-Path $ConfigDir 'last-path.txt') -Value $remote -NoNewline -Encoding ASCII
+    exit 0
+}
+catch {
+    Write-ClipbridgeLog -ConfigDir $ConfigDir -Message "unhandled: $($_.Exception.Message)"
+    exit 4
+}
+finally {
+    Remove-Item $tmpPng -Force -ErrorAction SilentlyContinue
+}

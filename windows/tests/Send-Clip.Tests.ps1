@@ -131,3 +131,35 @@ Describe 'Save-ClipboardPng' {
         Remove-Item $out -Force
     }
 }
+
+Describe 'Write-ClipbridgeLog' {
+    It 'appends a timestamped line' {
+        $dir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid())
+        New-Item -ItemType Directory -Path $dir | Out-Null
+        Write-ClipbridgeLog -ConfigDir $dir -Message 'ssh exploded'
+        $line = Get-Content (Join-Path $dir 'clipbridge.log') -Tail 1
+        $line | Should -Match '^\d{4}-\d{2}-\d{2}T'
+        $line | Should -Match 'ssh exploded'
+        Remove-Item -Recurse -Force $dir
+    }
+}
+
+Describe 'Test-RemotePath' {
+    It 'accepts a single absolute POSIX path' {
+        Test-RemotePath "/home/vollmin/.clipbridge/20260818-041500.png" | Should -BeTrue
+    }
+    It 'rejects empty output' { Test-RemotePath '' | Should -BeFalse }
+    It 'rejects a relative path' { Test-RemotePath 'clipbridge/x.png' | Should -BeFalse }
+    It 'rejects a path with a space, which would break unquoted typing' {
+        Test-RemotePath '/home/vollmin/my screenshots/x.png' | Should -BeFalse
+    }
+    It 'rejects a trailing newline' {
+        Test-RemotePath "/home/vollmin/.clipbridge/x.png`n" | Should -BeFalse
+    }
+    It 'rejects a trailing CR' {
+        Test-RemotePath "/home/vollmin/.clipbridge/x.png`r" | Should -BeFalse
+    }
+    It 'rejects multi-line output' {
+        Test-RemotePath "/home/vollmin/.clipbridge/x.png`n/another/line" | Should -BeFalse
+    }
+}
