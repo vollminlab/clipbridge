@@ -8,6 +8,8 @@
 set -u
 
 CLIP_DIR="${CLIPBRIDGE_DIR:-$HOME/.clipbridge}"
+KEEP_COUNT="${CLIPBRIDGE_KEEP_COUNT:-50}"
+KEEP_DAYS="${CLIPBRIDGE_KEEP_DAYS:-7}"
 
 die() { echo "clipbridge: $1" >&2; exit "$2"; }
 
@@ -57,5 +59,13 @@ done
 chmod 600 "$tmp" || die "cannot chmod incoming file" 5
 mv "$tmp" "$path" || die "cannot move incoming file into place" 5
 trap - EXIT INT TERM
+
+# Both bounds, every run. A burst should not be retained for a week, and a
+# single screenshot should not live forever.
+ls -1t "$CLIP_DIR"/*.png 2>/dev/null | tail -n "+$((KEEP_COUNT + 1))" | while IFS= read -r old; do
+    rm -f "$old"
+done
+# -exec ... \; rather than + : busybox find does not reliably support +.
+find "$CLIP_DIR" -maxdepth 1 -name '*.png' -mtime "+$KEEP_DAYS" -exec rm -f {} \; 2>/dev/null
 
 echo "$path"
