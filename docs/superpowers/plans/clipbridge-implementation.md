@@ -466,7 +466,10 @@ Create `windows/tests/Send-Clip.Tests.ps1`:
 
 ```powershell
 BeforeAll {
-    $script:ScriptPath = Join-Path $PSScriptRoot '..\Send-Clip.ps1'
+    # Nested 2-arg Join-Path: the 3-arg form is PS6+, and CI's windows job runs
+    # Windows PowerShell 5.1. A literal '..\Send-Clip.ps1' would also break here,
+    # because on Linux the backslash is part of the filename, not a separator.
+    $script:ScriptPath = Join-Path (Join-Path $PSScriptRoot '..') 'Send-Clip.ps1'
     . $script:ScriptPath -DotSourceOnly
 }
 
@@ -536,7 +539,12 @@ Create `windows/Send-Clip.ps1`:
 #>
 [CmdletBinding()]
 param(
-    [string] $ConfigDir     = (Join-Path $env:LOCALAPPDATA 'clipbridge'),
+    # Guarded rather than a bare Join-Path: $env:LOCALAPPDATA is null on Linux, and
+    # PowerShell binds EVERY parameter default before the script body runs -- even
+    # when -ConfigDir is supplied and even when -DotSourceOnly returns immediately.
+    # The unguarded form throws at bind time and blocks every test on this box.
+    # On Windows $env:LOCALAPPDATA is always set, so behavior there is unchanged.
+    [string] $ConfigDir     = $(if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'clipbridge' } else { 'clipbridge' }),
     [switch] $DotSourceOnly
 )
 
