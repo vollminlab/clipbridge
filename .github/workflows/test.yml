@@ -4,6 +4,10 @@ on:
   pull_request:
   push:
     branches: [main]
+  # Manual trigger only, so this workflow can be exercised on a feature
+  # branch during development without opening a PR (branch protection and
+  # the org's git-workflow rules require a PR for the real thing).
+  workflow_dispatch:
 
 jobs:
   shell:
