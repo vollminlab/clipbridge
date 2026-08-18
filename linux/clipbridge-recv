@@ -11,8 +11,8 @@ CLIP_DIR="${CLIPBRIDGE_DIR:-$HOME/.clipbridge}"
 
 die() { echo "clipbridge: $1" >&2; exit "$2"; }
 
-mkdir -p "$CLIP_DIR" 2>/dev/null || die "cannot create $CLIP_DIR" 5
-chmod 700 "$CLIP_DIR" 2>/dev/null || die "cannot chmod $CLIP_DIR" 5
+mkdir -p "$CLIP_DIR" || die "cannot create $CLIP_DIR" 5
+chmod 700 "$CLIP_DIR" || die "cannot chmod $CLIP_DIR" 5
 [ -w "$CLIP_DIR" ] || die "cannot write $CLIP_DIR" 5
 
 tmp=$(mktemp "$CLIP_DIR/.incoming.XXXXXX") || die "cannot create temp file in $CLIP_DIR" 5
@@ -20,7 +20,7 @@ trap 'rm -f "$tmp"' EXIT INT TERM
 
 # Write stdin out first, then inspect the file. Peeking at the stream would
 # consume the bytes we still need.
-cat > "$tmp"
+cat > "$tmp" || die "cannot write $tmp" 5
 
 [ -s "$tmp" ] || die "empty input" 3
 

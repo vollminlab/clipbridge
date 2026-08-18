@@ -51,5 +51,45 @@ if [ "$rc" -eq 3 ]; then pass "empty stdin exits 3"; else fail "empty stdin exit
 if grep -q "empty input" "$SANDBOX/err"; then pass "empty stdin explains itself"; else fail "empty stdin gave no reason"; fi
 cleanup_sandbox
 
+# --- a write that fails partway must not be reported as success ------------
+# Stub `cat` on PATH ahead of the real one. The script runs `cat > "$tmp"`,
+# so the stub must emit the PNG magic to ITS OWN stdout (which the script has
+# already redirected into $tmp) and then exit non-zero, simulating a write
+# that dies partway through (disk full, RO remount, quota).
+new_sandbox
+make_png_sig "$SANDBOX/in.png"
+STUBS="$SANDBOX/stubs"; mkdir -p "$STUBS"
+cat > "$STUBS/cat" << 'STUBEOF'
+#!/bin/sh
+printf '\211PNG\r\n\032\n'
+exit 1
+STUBEOF
+chmod +x "$STUBS/cat"
+OLD_PATH="$PATH"; PATH="$STUBS:$PATH"; export PATH
+out=$("$RECV" < "$SANDBOX/in.png" 2>"$SANDBOX/err"); rc=$?
+PATH="$OLD_PATH"; export PATH
+if [ "$rc" -eq 5 ]; then pass "a failed write exits 5"; else fail "a failed write exited $rc, want 5"; fi
+if [ -z "$(ls -A "$CLIPBRIDGE_DIR" 2>/dev/null)" ]; then pass "a failed write leaves no file behind"; else fail "a failed write left files in $CLIPBRIDGE_DIR"; fi
+cleanup_sandbox
+
+# --- unwritable target directory --------------------------------------------
+# NOTE: locking $CLIPBRIDGE_DIR itself does not work here -- the script does
+# an unconditional `chmod 700 "$CLIP_DIR"` as its own hardening step, and
+# chmod only requires ownership (not existing write permission), so an
+# owner-locked target directory silently self-heals before mktemp ever runs.
+# Verified empirically: chmod 500 on $CLIPBRIDGE_DIR + a run still exits 0.
+# Locking the PARENT instead makes `mkdir -p "$CLIP_DIR"` itself fail, which
+# is a real, unrecoverable "cannot write" condition.
+new_sandbox
+mkdir -p "$SANDBOX/locked"
+chmod 500 "$SANDBOX/locked"
+export CLIPBRIDGE_DIR="$SANDBOX/locked/clip"
+make_png_sig "$SANDBOX/in.png"
+out=$("$RECV" < "$SANDBOX/in.png" 2>"$SANDBOX/err"); rc=$?
+chmod 700 "$SANDBOX/locked"
+if [ "$rc" -eq 5 ]; then pass "unwritable parent directory exits 5"; else fail "unwritable parent directory exited $rc, want 5"; fi
+if [ -s "$SANDBOX/err" ]; then pass "unwritable parent directory explains itself"; else fail "unwritable parent directory failed silently"; fi
+cleanup_sandbox
+
 echo
 if [ "$FAILED" -eq 0 ]; then echo "all tests passed"; exit 0; else echo "$FAILED test(s) failed"; exit 1; fi
