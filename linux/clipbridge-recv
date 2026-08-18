@@ -12,7 +12,21 @@ CLIP_DIR="${CLIPBRIDGE_DIR:-$HOME/.clipbridge}"
 die() { echo "clipbridge: $1" >&2; exit "$2"; }
 
 mkdir -p "$CLIP_DIR" || die "cannot create $CLIP_DIR" 5
+
+# Unconditional, every run: this directory holds private screenshots, so
+# owner-only (0700) must self-heal from whatever a prior run or a stray
+# chmod -R left it as, rather than being trusted as a one-time setup step.
+# The kill switch for this tool is the forced-command entry in
+# authorized_keys, not filesystem permissions on its own storage directory.
 chmod 700 "$CLIP_DIR" || die "cannot chmod $CLIP_DIR" 5
+
+# Defense-in-depth, not a tested guard: under DAC alone this is unreachable
+# here. mkdir -p and chmod 700 above already succeeded, which guarantees
+# owner-write for this same process; a read-only remount or immutable
+# directory would fail the chmod itself first. The only way this fires is a
+# MAC framework (SELinux) permitting setattr but denying write -- not
+# applicable on this Ubuntu 24.04 box. Kept as a belt-and-suspenders check,
+# not evidence of coverage.
 [ -w "$CLIP_DIR" ] || die "cannot write $CLIP_DIR" 5
 
 tmp=$(mktemp "$CLIP_DIR/.incoming.XXXXXX") || die "cannot create temp file in $CLIP_DIR" 5

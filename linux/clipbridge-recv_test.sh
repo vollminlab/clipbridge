@@ -88,7 +88,7 @@ make_png_sig "$SANDBOX/in.png"
 out=$("$RECV" < "$SANDBOX/in.png" 2>"$SANDBOX/err"); rc=$?
 chmod 700 "$SANDBOX/locked"
 if [ "$rc" -eq 5 ]; then pass "unwritable parent directory exits 5"; else fail "unwritable parent directory exited $rc, want 5"; fi
-if [ -s "$SANDBOX/err" ]; then pass "unwritable parent directory explains itself"; else fail "unwritable parent directory failed silently"; fi
+if grep -q "cannot create" "$SANDBOX/err"; then pass "unwritable parent directory explains itself"; else fail "unwritable parent directory gave no reason: $(cat "$SANDBOX/err")"; fi
 cleanup_sandbox
 
 echo
