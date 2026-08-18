@@ -44,6 +44,11 @@ magic=$(od -An -tx1 -N8 "$tmp" | tr -d ' \n')
 base=$(date +%Y%m%d-%H%M%S)
 path="$CLIP_DIR/$base.png"
 n=2
+# Assumes a single-invocation caller (one person, one hotkey at a time) --
+# not safe under concurrent execution. The check-then-mv here is TOCTOU: two
+# truly concurrent invocations could both resolve the same free path, and
+# the later mv would overwrite the earlier one. No retry/lock is added for
+# this because there is no concurrent server-side request path to defend.
 while [ -e "$path" ]; do
     path="$CLIP_DIR/$base-$n.png"
     n=$((n + 1))

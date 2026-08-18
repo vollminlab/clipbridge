@@ -112,6 +112,18 @@ case "$second" in
     *)       fail "collision suffix wrong: $second" ;;
 esac
 if [ -f "$first" ] && [ -f "$second" ]; then pass "both files survive a collision"; else fail "a collision destroyed one of the files"; fi
+# The check above is not independently discriminating: when the collision
+# loop is absent, $first == $second, so it checks the same existing path
+# twice and passes even on broken code. Compare sizes instead -- the second
+# write appended extra bytes, so if $first was not overwritten its size must
+# still differ from $second's.
+size_first=$(wc -c < "$first")
+size_second=$(wc -c < "$second")
+if [ "$size_first" -ne "$size_second" ]; then
+    pass "the first file was not overwritten by the second"
+else
+    fail "first and second files are the same size ($size_first) -- first may have been overwritten"
+fi
 count=$(ls -1 "$CLIPBRIDGE_DIR"/*.png | wc -l)
 if [ "$count" -eq 2 ]; then pass "collision leaves exactly 2 files"; else fail "collision left $count files, want 2"; fi
 cleanup_sandbox
