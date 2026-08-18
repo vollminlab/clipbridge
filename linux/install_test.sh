@@ -39,6 +39,13 @@ new_sandbox
 dest="$SANDBOX/bin/clipbridge-recv"
 sh "$INSTALL" "$dest" > "$SANDBOX/out" 2>"$SANDBOX/err"
 if cmp -s "$SRC" "$dest"; then pass "installed file is byte-identical to source"; else fail "installed file differs from source"; fi
+# shellcheck disable=SC2012 # $dest is a path this test just created (mktemp
+# sandbox, fully controlled name -- not a glob result), so there's no
+# funky-filename risk to parse around. Extracting the mode string this way
+# is the portable choice: GNU stat's `-c` and BSD/busybox stat's `-f` take
+# different format strings, and busybox stat supports neither reliably, so
+# there is no single stat invocation that works under both dash and busybox
+# ash here. `ls -l` is universal across all three.
 mode=$(ls -l "$dest" | cut -c1-10)
 if [ "$mode" = "-rwxr-xr-x" ]; then pass "installed file is mode 0755"; else fail "installed file mode is $mode, want -rwxr-xr-x"; fi
 cleanup_sandbox
