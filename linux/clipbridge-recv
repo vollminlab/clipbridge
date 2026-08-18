@@ -72,6 +72,10 @@ trap - EXIT INT TERM
 # [0-9]{8}-[0-9]{6}(-[0-9]+)?.png, so this only matters if something other
 # than this script drops an oddly-named file into CLIP_DIR. Spaces and
 # backslashes are handled correctly by `IFS= read -r`; newlines are not.
+# shellcheck disable=SC2012 # `find` has no portable substitute for `ls -t`
+# across GNU, BSD and busybox find -- this prune is "keep the newest
+# KEEP_COUNT", which requires mtime-sorted order, not just a file list.
+# The newline caveat this creates is already covered above.
 ls -1t "$CLIP_DIR"/*.png 2>/dev/null | tail -n "+$((KEEP_COUNT + 1))" | while IFS= read -r old; do
     rm -f "$old"
 done

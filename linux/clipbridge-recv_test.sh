@@ -31,6 +31,13 @@ case "$out" in
     /*) pass "printed path is absolute" ;;
     *)  fail "printed path is not absolute: '$out'" ;;
 esac
+# shellcheck disable=SC2012 # $out is a path this test just created (mktemp
+# sandbox, fully controlled name -- not a glob result), so there's no
+# funky-filename risk to parse around. Extracting the mode string this way
+# is the portable choice: GNU stat's `-c` and BSD/busybox stat's `-f` take
+# different format strings, and busybox stat supports neither reliably, so
+# there is no single stat invocation that works under both dash and busybox
+# ash here. `ls -l` is universal across all three.
 mode=$(ls -l "$out" | cut -c1-10)
 if [ "$mode" = "-rw-------" ]; then pass "stored file is 0600"; else fail "stored file mode is $mode, want -rw-------"; fi
 cleanup_sandbox
@@ -124,7 +131,7 @@ if [ "$size_first" -ne "$size_second" ]; then
 else
     fail "first and second files are the same size ($size_first) -- first may have been overwritten"
 fi
-count=$(ls -1 "$CLIPBRIDGE_DIR"/*.png | wc -l)
+count=$(find "$CLIPBRIDGE_DIR" -maxdepth 1 -name '*.png' | wc -l)
 if [ "$count" -eq 2 ]; then pass "collision leaves exactly 2 files"; else fail "collision left $count files, want 2"; fi
 cleanup_sandbox
 
@@ -139,7 +146,7 @@ while [ "$i" -le 5 ]; do
 done
 make_png_sig "$SANDBOX/in.png"
 CLIPBRIDGE_KEEP_COUNT=3 CLIPBRIDGE_KEEP_DAYS=36500 "$RECV" < "$SANDBOX/in.png" > /dev/null
-count=$(ls -1 "$CLIPBRIDGE_DIR"/*.png | wc -l)
+count=$(find "$CLIPBRIDGE_DIR" -maxdepth 1 -name '*.png' | wc -l)
 if [ "$count" -eq 3 ]; then pass "prune keeps exactly KEEP_COUNT files"; else fail "prune left $count files, want 3"; fi
 if [ ! -f "$CLIPBRIDGE_DIR/20260101-000000.png" ]; then pass "prune deleted the oldest"; else fail "prune kept the oldest"; fi
 cleanup_sandbox
@@ -152,7 +159,7 @@ touch -t "202001010000" "$CLIPBRIDGE_DIR/20200101-000000.png"
 make_png_sig "$SANDBOX/in.png"
 CLIPBRIDGE_KEEP_COUNT=50 CLIPBRIDGE_KEEP_DAYS=7 "$RECV" < "$SANDBOX/in.png" > /dev/null
 if [ ! -f "$CLIPBRIDGE_DIR/20200101-000000.png" ]; then pass "prune deletes by age under the count cap"; else fail "age-based prune did not fire"; fi
-count=$(ls -1 "$CLIPBRIDGE_DIR"/*.png | wc -l)
+count=$(find "$CLIPBRIDGE_DIR" -maxdepth 1 -name '*.png' | wc -l)
 if [ "$count" -eq 1 ]; then pass "the new file survives age pruning"; else fail "age prune left $count files, want 1"; fi
 cleanup_sandbox
 
