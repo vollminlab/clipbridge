@@ -19,6 +19,13 @@ dot-sourcing the script in a test throws before any test runs. Every Windows-onl
 inside a function that tests mock away. That is why `Get-ClipboardDataObject` exists as a
 one-line wrapper: it is the single seam where the platform-specific surface is quarantined.
 
+**Windows-gated tests must use `$env:OS -ne 'Windows_NT'`, never `-not $IsWindows`.**
+`$IsWindows` is a PS6+ automatic variable and does not exist under Windows PowerShell 5.1 —
+which is exactly what `shell: powershell` gives you on `windows-latest`. There the undefined
+variable evaluates to `$null`, so `-not $IsWindows` is always `$true` and the test skips
+forever, *including on the one platform it exists to cover*. A permanently-skipped test reads
+as coverage in the summary while providing none. `$env:OS` is set on both 5.1 and Core.
+
 **Design spec:** `docs/superpowers/specs/clipbridge-design.md`. All four verification items are measured green — do not re-litigate the transport or targeting decisions, they were tested.
 
 ---
