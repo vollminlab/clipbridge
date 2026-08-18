@@ -332,35 +332,21 @@ git commit -m "feat: prune stored images by both count and age"
 
 ---
 
-## Task 4: Receiver — unwritable directory, then install
+## Task 4: Receiver — installer
 
 **Files:**
-- Modify: `linux/clipbridge-recv_test.sh`
 - Create: `linux/install.sh`
 
-- [ ] **Step 1: Write the failing test**
+> **Plan correction (2026-08-18).** This task originally opened with an
+> unwritable-directory test that did `chmod 500 "$CLIPBRIDGE_DIR"` and expected exit 5,
+> annotated "Expected: PASS — the `[ -w ]` guard already covers it." **That was wrong.**
+> The script's own unconditional `chmod 700 "$CLIP_DIR"` repairs the lockdown before
+> `mktemp` runs, because `chmod(2)` requires only ownership, not prior write permission —
+> so the case exits 0, not 5. Exit-5 coverage was added during Task 1 review instead, by
+> locking the *parent* directory so `mkdir -p` itself fails. Do not reintroduce the
+> original test.
 
-Append before the summary block in `linux/clipbridge-recv_test.sh`:
-
-```sh
-# --- unwritable target directory -------------------------------------------
-new_sandbox
-mkdir -p "$CLIPBRIDGE_DIR"
-chmod 500 "$CLIPBRIDGE_DIR"
-make_png_sig "$SANDBOX/in.png"
-out=$("$RECV" < "$SANDBOX/in.png" 2>"$SANDBOX/err"); rc=$?
-chmod 700 "$CLIPBRIDGE_DIR"
-if [ "$rc" -eq 5 ]; then pass "unwritable directory exits 5"; else fail "unwritable directory exited $rc, want 5"; fi
-if [ -s "$SANDBOX/err" ]; then pass "unwritable directory explains itself"; else fail "unwritable directory failed silently"; fi
-cleanup_sandbox
-```
-
-- [ ] **Step 2: Run it to verify it passes or fails**
-
-Run: `dash linux/clipbridge-recv_test.sh`
-Expected: PASS — the `[ -w "$CLIP_DIR" ]` guard from Task 1 already covers it. This test locks in behavior that is easy to lose in a later refactor. If it FAILS, the guard was dropped; restore it before continuing.
-
-- [ ] **Step 3: Write the installer**
+- [ ] **Step 1: Write the installer**
 
 Create `linux/install.sh`:
 
@@ -392,7 +378,7 @@ Then verify from the laptop:
 EOF
 ```
 
-- [ ] **Step 4: Install and smoke-test it live**
+- [ ] **Step 2: Install and smoke-test it live**
 
 ```bash
 sh linux/install.sh
@@ -402,11 +388,11 @@ ls -l ~/.clipbridge/
 ```
 Expected: a path is printed, and `ls -l` shows one `-rw-------` file at that path.
 
-- [ ] **Step 5: Commit and open the PR**
+- [ ] **Step 3: Commit and open the PR**
 
 ```bash
-git add linux/clipbridge-recv_test.sh linux/install.sh
-git commit -m "feat: add receiver installer and lock in the unwritable-dir guard"
+git add linux/install.sh
+git commit -m "feat: add receiver installer"
 git push -u origin feat/receiver
 gh pr create --title "feat: clipbridge receiver" --body "POSIX sh receiver: validate a PNG on stdin, store it 0600, prune by count and age, print the path. Tests pass under dash and busybox ash. No tmux dependency — targeting is the laptop's job."
 ```
