@@ -3,11 +3,12 @@ name: test
 on:
   pull_request:
   push:
-    branches: [main]
-  # Manual trigger only, so this workflow can be exercised on a feature
-  # branch during development without opening a PR (branch protection and
-  # the org's git-workflow rules require a PR for the real thing).
-  workflow_dispatch:
+    # TEMP while iterating on this workflow without a PR open: feat/ci is
+    # listed here only so pushes to this branch itself trigger a run
+    # (workflow_dispatch can't be used pre-merge -- GitHub only allows manual
+    # dispatch of a workflow that already exists on the default branch).
+    # Remove "feat/ci" from this list before the PR merges.
+    branches: [main, feat/ci]
 
 jobs:
   shell:
