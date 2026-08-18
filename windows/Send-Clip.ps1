@@ -54,4 +54,38 @@ function Get-SshInvocation {
     return [pscustomobject]@{ Exe = 'ssh.exe'; Arguments = @($SshHost) }
 }
 
+# The single seam where Windows-only APIs are quarantined. Tests mock this, which
+# is also what keeps the file dot-sourceable on Linux: System.Windows.Forms is
+# Windows-only and would throw at load time if these Add-Types were at file scope.
+function Get-ClipboardDataObject {
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+    return [System.Windows.Forms.Clipboard]::GetDataObject()
+}
+
+function Save-ClipboardPng {
+    param([Parameter(Mandatory)][string] $Path)
+
+    $dobj = Get-ClipboardDataObject
+    if ($null -eq $dobj) { return $null }
+
+    if ($dobj.GetDataPresent('PNG')) {
+        # A real PNG stream: use it verbatim. GetImage() routes through a
+        # device-independent bitmap and flattens transparency to black.
+        $stream = $dobj.GetData('PNG')
+        $fs = [System.IO.File]::Create($Path)
+        try { $stream.Position = 0; $stream.CopyTo($fs) } finally { $fs.Dispose() }
+        return $Path
+    }
+
+    # Windows-only, and never reached in tests: the no-image case returns above on a
+    # null data object, and the PNG case takes the branch above. PowerShell resolves
+    # types at runtime, so naming them here is harmless on Linux as long as this line
+    # does not execute.
+    $img = [System.Windows.Forms.Clipboard]::GetImage()
+    if ($null -eq $img) { return $null }
+    $img.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
+    return $Path
+}
+
 if ($DotSourceOnly) { return }

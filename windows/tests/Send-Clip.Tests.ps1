@@ -62,3 +62,25 @@ Describe 'Get-SshInvocation' {
         $inv.Arguments[2] | Should -Be 'clipbridge'
     }
 }
+
+Describe 'Save-ClipboardPng' {
+    It 'returns $null when the clipboard holds no image' {
+        Mock -CommandName Get-ClipboardDataObject -MockWith { $null }
+        Save-ClipboardPng -Path (Join-Path ([System.IO.Path]::GetTempPath()) 'never-written.png') | Should -BeNullOrEmpty
+    }
+    It 'prefers the PNG stream over the bitmap when both are present' {
+        $bytes = [byte[]](0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A,0x41,0x42)
+        $script:ms = New-Object System.IO.MemoryStream(,$bytes)
+        Mock -CommandName Get-ClipboardDataObject -MockWith {
+            $o = New-Object psobject
+            $o | Add-Member ScriptMethod GetDataPresent { param($f) $f -eq 'PNG' } -PassThru |
+                 Add-Member ScriptMethod GetData        { param($f) $script:ms }  -PassThru
+        }
+        $out = Join-Path ([System.IO.Path]::GetTempPath()) 'clipbridge-test-stream.png'
+        Save-ClipboardPng -Path $out | Should -Be $out
+        (Get-Item $out).Length | Should -Be 10
+        [System.IO.File]::ReadAllBytes($out)[0..7] |
+            Should -Be @(0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A)
+        Remove-Item $out -Force
+    }
+}
