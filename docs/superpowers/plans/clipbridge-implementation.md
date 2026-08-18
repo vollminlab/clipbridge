@@ -758,7 +758,11 @@ function Test-RemotePath {
     if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
     # One line, absolute, no whitespace: the path is typed unquoted into a prompt,
     # so anything else is not safe to hand to SendText.
-    return ($Path -match '^/[^\s]+$')
+    #
+    # \z, NOT $. .NET's $ also matches immediately before a single trailing newline,
+    # so '/path/x.png\n' passes with $ -- and AHK would type that newline as ENTER,
+    # submitting the prompt before the user could write their question.
+    return ($Path -match '^/[^\s]+\z')
 }
 ```
 
