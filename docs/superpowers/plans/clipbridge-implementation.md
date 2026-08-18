@@ -8,6 +8,17 @@
 
 **Tech Stack:** POSIX `sh` (must pass under `dash` and `busybox ash`), Windows PowerShell 5.1, AutoHotkey v2, OpenSSH (`ssh.exe`), Pester, shellcheck, GitHub Actions.
 
+**Where the PowerShell tests actually run.** devsbx01 has `pwsh` 7.6.5 and Pester 6.1.0, so the
+PowerShell half is developed test-first *on Linux*, exactly like the shell half — no waiting on
+CI, no merging on faith. Measured 2026-08-18: Pester 6 accepts the Pester-5 syntax used here
+(`BeforeAll`, `Should -Be`, `Should -Throw -ExpectedMessage`, `Mock`) unchanged.
+
+**The constraint that falls out of it:** `Add-Type -AssemblyName System.Windows.Forms` **fails on
+Linux** — the assembly is Windows-only. So no Windows-only API may be touched at *load* time, or
+dot-sourcing the script in a test throws before any test runs. Every Windows-only call must sit
+inside a function that tests mock away. That is why `Get-ClipboardDataObject` exists as a
+one-line wrapper: it is the single seam where the platform-specific surface is quarantined.
+
 **Design spec:** `docs/superpowers/specs/clipbridge-design.md`. All four verification items are measured green — do not re-litigate the transport or targeting decisions, they were tested.
 
 ---
@@ -332,35 +343,21 @@ git commit -m "feat: prune stored images by both count and age"
 
 ---
 
-## Task 4: Receiver — unwritable directory, then install
+## Task 4: Receiver — installer
 
 **Files:**
-- Modify: `linux/clipbridge-recv_test.sh`
 - Create: `linux/install.sh`
 
-- [ ] **Step 1: Write the failing test**
+> **Plan correction (2026-08-18).** This task originally opened with an
+> unwritable-directory test that did `chmod 500 "$CLIPBRIDGE_DIR"` and expected exit 5,
+> annotated "Expected: PASS — the `[ -w ]` guard already covers it." **That was wrong.**
+> The script's own unconditional `chmod 700 "$CLIP_DIR"` repairs the lockdown before
+> `mktemp` runs, because `chmod(2)` requires only ownership, not prior write permission —
+> so the case exits 0, not 5. Exit-5 coverage was added during Task 1 review instead, by
+> locking the *parent* directory so `mkdir -p` itself fails. Do not reintroduce the
+> original test.
 
-Append before the summary block in `linux/clipbridge-recv_test.sh`:
-
-```sh
-# --- unwritable target directory -------------------------------------------
-new_sandbox
-mkdir -p "$CLIPBRIDGE_DIR"
-chmod 500 "$CLIPBRIDGE_DIR"
-make_png_sig "$SANDBOX/in.png"
-out=$("$RECV" < "$SANDBOX/in.png" 2>"$SANDBOX/err"); rc=$?
-chmod 700 "$CLIPBRIDGE_DIR"
-if [ "$rc" -eq 5 ]; then pass "unwritable directory exits 5"; else fail "unwritable directory exited $rc, want 5"; fi
-if [ -s "$SANDBOX/err" ]; then pass "unwritable directory explains itself"; else fail "unwritable directory failed silently"; fi
-cleanup_sandbox
-```
-
-- [ ] **Step 2: Run it to verify it passes or fails**
-
-Run: `dash linux/clipbridge-recv_test.sh`
-Expected: PASS — the `[ -w "$CLIP_DIR" ]` guard from Task 1 already covers it. This test locks in behavior that is easy to lose in a later refactor. If it FAILS, the guard was dropped; restore it before continuing.
-
-- [ ] **Step 3: Write the installer**
+- [ ] **Step 1: Write the installer**
 
 Create `linux/install.sh`:
 
@@ -392,7 +389,7 @@ Then verify from the laptop:
 EOF
 ```
 
-- [ ] **Step 4: Install and smoke-test it live**
+- [ ] **Step 2: Install and smoke-test it live**
 
 ```bash
 sh linux/install.sh
@@ -402,11 +399,11 @@ ls -l ~/.clipbridge/
 ```
 Expected: a path is printed, and `ls -l` shows one `-rw-------` file at that path.
 
-- [ ] **Step 5: Commit and open the PR**
+- [ ] **Step 3: Commit and open the PR**
 
 ```bash
-git add linux/clipbridge-recv_test.sh linux/install.sh
-git commit -m "feat: add receiver installer and lock in the unwritable-dir guard"
+git add linux/install.sh
+git commit -m "feat: add receiver installer"
 git push -u origin feat/receiver
 gh pr create --title "feat: clipbridge receiver" --body "POSIX sh receiver: validate a PNG on stdin, store it 0600, prune by count and age, print the path. Tests pass under dash and busybox ash. No tmux dependency — targeting is the laptop's job."
 ```
@@ -519,7 +516,7 @@ Describe 'Get-SshInvocation' {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run (on Windows): `Invoke-Pester .\windows\tests\Send-Clip.Tests.ps1`
+Run: `pwsh -NoProfile -Command "Invoke-Pester ./windows/tests/Send-Clip.Tests.ps1 -Output Detailed"`
 Expected: FAIL — `Send-Clip.ps1` does not exist.
 
 - [ ] **Step 3: Write the minimal implementation**
@@ -576,7 +573,7 @@ if ($DotSourceOnly) { return }
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `Invoke-Pester .\windows\tests\Send-Clip.Tests.ps1`
+Run: `pwsh -NoProfile -Command "Invoke-Pester ./windows/tests/Send-Clip.Tests.ps1 -Output Detailed"`
 Expected: 5 passed, 0 failed.
 
 - [ ] **Step 5: Commit**
@@ -626,19 +623,26 @@ Describe 'Save-ClipboardPng' {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `Invoke-Pester .\windows\tests\Send-Clip.Tests.ps1`
+Run: `pwsh -NoProfile -Command "Invoke-Pester ./windows/tests/Send-Clip.Tests.ps1 -Output Detailed"`
 Expected: FAIL — `Save-ClipboardPng` and `Get-ClipboardDataObject` are not defined.
 
 - [ ] **Step 3: Write the implementation**
 
-Add to `windows/Send-Clip.ps1`, above the `if ($DotSourceOnly)` line:
+Add to `windows/Send-Clip.ps1`, above the `if ($DotSourceOnly)` line.
+
+**The `Add-Type` calls go INSIDE the function, not at file scope.** `System.Windows.Forms` does
+not exist on Linux, and these tests run under `pwsh` on devsbx01 — loading it at file scope makes
+dot-sourcing throw before any test executes. Keeping it inside the one function tests always mock
+means the whole file stays dot-sourceable on Linux, and the assemblies load only on the machine
+that has them.
 
 ```powershell
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
-
-# Wrapped in a function purely so tests can mock the clipboard.
+# The single seam where Windows-only APIs are quarantined. Tests mock this, which
+# is also what keeps the file dot-sourceable on Linux (System.Windows.Forms is
+# Windows-only and would throw at load time if this were at file scope).
 function Get-ClipboardDataObject {
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
     return [System.Windows.Forms.Clipboard]::GetDataObject()
 }
 
@@ -657,6 +661,10 @@ function Save-ClipboardPng {
         return $Path
     }
 
+    # Windows-only, and never reached in tests: the no-image case returns above on a
+    # null data object, and the PNG case takes the branch above. PowerShell resolves
+    # types at runtime, so naming them here is harmless on Linux as long as this line
+    # does not execute.
     $img = [System.Windows.Forms.Clipboard]::GetImage()
     if ($null -eq $img) { return $null }
     $img.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
@@ -666,7 +674,7 @@ function Save-ClipboardPng {
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `Invoke-Pester .\windows\tests\Send-Clip.Tests.ps1`
+Run: `pwsh -NoProfile -Command "Invoke-Pester ./windows/tests/Send-Clip.Tests.ps1 -Output Detailed"`
 Expected: 7 passed, 0 failed.
 
 - [ ] **Step 5: Commit**
@@ -715,7 +723,7 @@ Describe 'Test-RemotePath' {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `Invoke-Pester .\windows\tests\Send-Clip.Tests.ps1`
+Run: `pwsh -NoProfile -Command "Invoke-Pester ./windows/tests/Send-Clip.Tests.ps1 -Output Detailed"`
 Expected: FAIL — `Write-ClipbridgeLog` and `Test-RemotePath` are not defined.
 
 - [ ] **Step 3: Write the implementation**
@@ -796,7 +804,7 @@ finally {
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `Invoke-Pester .\windows\tests\Send-Clip.Tests.ps1`
+Run: `pwsh -NoProfile -Command "Invoke-Pester ./windows/tests/Send-Clip.Tests.ps1 -Output Detailed"`
 Expected: 12 passed, 0 failed.
 
 - [ ] **Step 5: Commit**
