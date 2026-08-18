@@ -32,6 +32,20 @@ Describe 'Get-ClipbridgeConfig' {
         { Get-ClipbridgeConfig -ConfigDir $script:CfgDir } |
             Should -Throw -ExpectedMessage '*carrier-pigeon*'
     }
+
+    It 'throws when sshHost is blank' {
+        '{ "sshHost": "", "transport": "ssh" }' |
+            Set-Content (Join-Path $script:CfgDir 'config.json')
+        { Get-ClipbridgeConfig -ConfigDir $script:CfgDir } |
+            Should -Throw -ExpectedMessage '*no sshHost*'
+    }
+
+    It 'names the config path when config.json is not valid JSON' {
+        $cfgPath = Join-Path $script:CfgDir 'config.json'
+        '{ "sshHost": "clipbridge", ' | Set-Content $cfgPath
+        { Get-ClipbridgeConfig -ConfigDir $script:CfgDir } |
+            Should -Throw -ExpectedMessage "*$cfgPath*"
+    }
 }
 
 Describe 'Get-SshInvocation' {

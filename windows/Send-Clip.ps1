@@ -14,7 +14,11 @@ param(
     # for testing; Join-Path throws on a null/empty Path there. Guard so the
     # default expression never throws during parameter binding - real Windows
     # invocations always have LOCALAPPDATA set, so behavior there is unchanged.
-    [string] $ConfigDir     = $(if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'clipbridge' } else { 'clipbridge' }),
+    # The fallback must be absolute: a relative 'clipbridge' would let a later
+    # New-Item -Force silently create the directory under whatever the
+    # process's current directory happens to be, instead of erroring loudly.
+    # $HOME is set on both Linux and Windows PowerShell 5.1+.
+    [string] $ConfigDir     = $(if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'clipbridge' } else { Join-Path $HOME '.clipbridge' }),
     [switch] $DotSourceOnly
 )
 
@@ -25,7 +29,11 @@ function Get-ClipbridgeConfig {
     if (-not (Test-Path $path)) {
         throw "clipbridge config not found at $path - run Install-Clipbridge.ps1"
     }
-    $cfg = Get-Content $path -Raw | ConvertFrom-Json
+    try {
+        $cfg = Get-Content $path -Raw | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        throw "clipbridge config at $path is not valid JSON - $($_.Exception.Message)"
+    }
     if ($cfg.transport -notin @('ssh', 'wsl')) {
         throw "clipbridge config has an unknown transport '$($cfg.transport)' - expected ssh or wsl"
     }
