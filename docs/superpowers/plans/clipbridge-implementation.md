@@ -19,6 +19,13 @@ dot-sourcing the script in a test throws before any test runs. Every Windows-onl
 inside a function that tests mock away. That is why `Get-ClipboardDataObject` exists as a
 one-line wrapper: it is the single seam where the platform-specific surface is quarantined.
 
+**Windows-gated tests must use `$env:OS -ne 'Windows_NT'`, never `-not $IsWindows`.**
+`$IsWindows` is a PS6+ automatic variable and does not exist under Windows PowerShell 5.1 —
+which is exactly what `shell: powershell` gives you on `windows-latest`. There the undefined
+variable evaluates to `$null`, so `-not $IsWindows` is always `$true` and the test skips
+forever, *including on the one platform it exists to cover*. A permanently-skipped test reads
+as coverage in the summary while providing none. `$env:OS` is set on both 5.1 and Core.
+
 **Design spec:** `docs/superpowers/specs/clipbridge-design.md`. All four verification items are measured green — do not re-litigate the transport or targeting decisions, they were tested.
 
 ---
@@ -466,7 +473,10 @@ Create `windows/tests/Send-Clip.Tests.ps1`:
 
 ```powershell
 BeforeAll {
-    $script:ScriptPath = Join-Path $PSScriptRoot '..\Send-Clip.ps1'
+    # Nested 2-arg Join-Path: the 3-arg form is PS6+, and CI's windows job runs
+    # Windows PowerShell 5.1. A literal '..\Send-Clip.ps1' would also break here,
+    # because on Linux the backslash is part of the filename, not a separator.
+    $script:ScriptPath = Join-Path (Join-Path $PSScriptRoot '..') 'Send-Clip.ps1'
     . $script:ScriptPath -DotSourceOnly
 }
 
@@ -536,7 +546,16 @@ Create `windows/Send-Clip.ps1`:
 #>
 [CmdletBinding()]
 param(
-    [string] $ConfigDir     = (Join-Path $env:LOCALAPPDATA 'clipbridge'),
+    # Guarded rather than a bare Join-Path: $env:LOCALAPPDATA is null on Linux, and
+    # PowerShell binds EVERY parameter default before the script body runs -- even
+    # when -ConfigDir is supplied and even when -DotSourceOnly returns immediately.
+    # The unguarded form throws at bind time and blocks every test on this box.
+    # On Windows $env:LOCALAPPDATA is always set, so behavior there is unchanged.
+    # The fallback is ABSOLUTE on purpose: a relative one would not error, it would
+    # silently create clipbridge/ in whatever the process's working directory happens
+    # to be -- System32 for a scheduled task -- and write there while the user checks
+    # %LOCALAPPDATA% and finds nothing.
+    [string] $ConfigDir     = $(if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'clipbridge' } else { Join-Path $HOME '.clipbridge' }),
     [switch] $DotSourceOnly
 )
 
@@ -746,7 +765,11 @@ function Test-RemotePath {
     if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
     # One line, absolute, no whitespace: the path is typed unquoted into a prompt,
     # so anything else is not safe to hand to SendText.
-    return ($Path -match '^/[^\s]+$')
+    #
+    # \z, NOT $. .NET's $ also matches immediately before a single trailing newline,
+    # so '/path/x.png\n' passes with $ -- and AHK would type that newline as ENTER,
+    # submitting the prompt before the user could write their question.
+    return ($Path -match '^/[^\s]+\z')
 }
 ```
 
