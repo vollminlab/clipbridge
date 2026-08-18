@@ -1,0 +1,78 @@
+name: test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  shell:
+    name: shell (shellcheck, dash, busybox ash)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # dash and shellcheck ship preinstalled on the ubuntu-latest runner image;
+      # busybox-static is not, and its ash applet is what we need for the
+      # busybox suite run (regular busybox package can lack the ash applet
+      # depending on build).
+      - name: Install busybox-static
+        run: sudo apt-get update && sudo apt-get install -y busybox-static
+
+      # -s sh: clipbridge-recv has no .sh extension, so shellcheck can't infer
+      # the dialect from the filename. All four files use #!/bin/sh anyway, so
+      # -s sh is correct for all of them, not just the extensionless one.
+      - name: shellcheck
+        run: |
+          shellcheck -s sh \
+            linux/clipbridge-recv \
+            linux/clipbridge-recv_test.sh \
+            linux/install.sh \
+            linux/install_test.sh
+
+      - name: dash - clipbridge-recv_test.sh
+        run: dash linux/clipbridge-recv_test.sh
+
+      - name: dash - install_test.sh
+        run: dash linux/install_test.sh
+
+      - name: busybox ash - clipbridge-recv_test.sh
+        run: busybox ash linux/clipbridge-recv_test.sh
+
+      - name: busybox ash - install_test.sh
+        run: busybox ash linux/install_test.sh
+
+  pester:
+    name: pester (windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Production runs powershell.exe -STA (Windows PowerShell 5.1). Testing
+      # so far has only ever exercised pwsh (7) on Linux. Run the suite under
+      # BOTH runtimes here so a 5.1-only regression (e.g. the $IsWindows gap
+      # already hit once) can't slip through unnoticed.
+      - name: Pester on pwsh (PowerShell 7)
+        shell: pwsh
+        run: |
+          Install-Module Pester -Force -SkipPublisherCheck -MinimumVersion 5.5.0
+          Import-Module Pester -MinimumVersion 5.5.0
+          $result = Invoke-Pester -Path windows/tests -PassThru
+          "Total={0} Passed={1} Failed={2} Skipped={3}" -f $result.TotalCount, $result.PassedCount, $result.FailedCount, $result.SkippedCount
+          if ($result.FailedCount -gt 0 -or $result.SkippedCount -gt 0) {
+            Write-Error "pwsh run: $($result.FailedCount) failed, $($result.SkippedCount) skipped (want 0 and 0)"
+            exit 1
+          }
+
+      - name: Pester on powershell (Windows PowerShell 5.1)
+        shell: powershell
+        run: |
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+          Install-Module Pester -Force -SkipPublisherCheck -MinimumVersion 5.5.0
+          Import-Module Pester -MinimumVersion 5.5.0
+          $result = Invoke-Pester -Path windows/tests -PassThru
+          "Total={0} Passed={1} Failed={2} Skipped={3}" -f $result.TotalCount, $result.PassedCount, $result.FailedCount, $result.SkippedCount
+          if ($result.FailedCount -gt 0 -or $result.SkippedCount -gt 0) {
+            Write-Error "powershell 5.1 run: $($result.FailedCount) failed, $($result.SkippedCount) skipped (want 0 and 0)"
+            exit 1
+          }
