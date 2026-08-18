@@ -1,7 +1,7 @@
 # clipbridge — design
 
 **Date:** 2026-08-18
-**Status:** Approved, pending pre-build verification (see "Verification plan")
+**Status:** Approved. All verification items measured green on 2026-08-18.
 **Author:** Scott Vollmin (with Claude)
 
 ## Problem
@@ -91,11 +91,32 @@ at all.
 
 ### 1. `clipbridge.ahk` — Windows, resident
 
-AutoHotkey v2 script in the tray. Binds `Ctrl+Shift+V` (set at the top of the script, not
-in a config file — AHK v2 has no JSON parser, and a config only one component can read is
-a trap).
+AutoHotkey v2 script in the tray. Hotkeys are set at the top of the script, not in a
+config file — AHK v2 has no JSON parser, and a config only one component can read is a
+trap.
 
-On the hotkey:
+**`Ctrl+V`, scoped to the terminal window**, is the primary binding, because the target
+behavior is "pasting a screenshot works," not "a special key exists":
+
+```
+#HotIf WinActive("ahk_exe WindowsTerminal.exe")
+^v:: {
+    if (!ClipboardHasImage())
+        return Send("^v")          ; ordinary text paste, untouched
+    if (!RunClipbridge())
+        return Send("^v")          ; ANY failure falls through to a normal paste
+}
+#HotIf
+```
+
+`Ctrl+Shift+V` is bound unscoped as an explicit "force" — send the image and give me the
+path even if text is also on the clipboard.
+
+**A failure must never leave `Ctrl+V` dead.** A paste key that silently does nothing when
+the box is unreachable is worse than no tool at all, so every non-zero path ends in a
+normal paste plus the usual beep and log line.
+
+On a clipbridge run:
 
 1. `RunWait` `Send-Clip.ps1` hidden, capture its exit code.
 2. On exit 0, read the returned path from `%LOCALAPPDATA%\clipbridge\last-path.txt` and
@@ -208,7 +229,7 @@ contract with the Windows side.
 
 1. Screenshot lands on the Windows clipboard.
 2. You click into the terminal showing the Claude session you want (you were going to type
-   your question there anyway) and press `Ctrl+Shift+V`.
+   your question there anyway) and press `Ctrl+V`.
 3. AHK spawns `Send-Clip.ps1` hidden and waits.
 4. PowerShell extracts a PNG to `%TEMP%`.
 5. `ssh clipbridge` streams those bytes; the restricted key forces `clipbridge-recv`.
@@ -231,10 +252,13 @@ No failure is silent, and no failure is reported without its reason.
 | Non-PNG or empty stdin | 3 | Receiver writes the reason to stderr; ssh relays it into the same log. |
 | Receiver cannot write `~/.clipbridge` | 5 | Reason logged; error beep; nothing typed. |
 | Receiver printed no path / unparseable | 6 | Logged; error beep; nothing typed. The image may exist on the far side; the log records the raw stdout so it can be recovered. |
-| Hotkey pressed with a non-terminal focused | — | The path is typed into whatever has focus. Visible and harmless, and recoverable — the file still exists and `last-path.txt` still holds its path. |
+| Hotkey pressed with a non-terminal focused | — | `Ctrl+V` is scoped to the terminal, so this only applies to the unscoped `Ctrl+Shift+V` force binding. The path is typed into whatever has focus: visible, harmless, and recoverable — the file still exists and `last-path.txt` still holds its path. |
+| Clipboard holds text, not an image | — | Ordinary paste. `Ctrl+V` behaves exactly as it did before clipbridge existed. |
 
-Nothing is ever typed on a non-zero exit. A tool that types a stale or partial path into a
-prompt is worse than one that does nothing and says why.
+Nothing is ever typed on a non-zero exit, and **every non-zero exit falls through to a
+normal paste**. A tool that types a stale or partial path into a prompt is worse than one
+that does nothing and says why — and a paste key that silently does nothing when the far
+side is unreachable is worse than both.
 
 The log is append-only with a timestamp per entry, capped by the same 7-day rule as the
 images.
@@ -275,25 +299,33 @@ required checks is a `github-admin` (OpenTofu) change and is explicitly **out of
 this repo's PRs** — the `vars.CI_RUNNER` escape hatch must exist before any check is made
 required.
 
-## Verification plan — before any implementation
+## Verification results
 
-Each item is cheap, and each one can invalidate a component. They are ordered so the
-cheapest disqualifier runs first.
+All four items were measured on 2026-08-18 before any implementation. Each was run through
+the production mechanism rather than an equivalent one.
 
-1. **`SendText` survives the full input path at speed.** Type a ~45-character path into a
-   live Claude Code prompt through Windows Terminal → mosh → tmux and confirm every
-   character arrives, in order, with no drops. mosh is a reliable protocol so this should
-   hold, but it is the single assumption the whole redesign rests on. If characters drop,
-   the fix is `SendMode("Event")` with a small `SetKeyDelay`; if that also fails, injection
-   falls back to server-side `tmux send-keys` (already proven to work) and the targeting
-   problem returns to the table.
-2. **Clipboard formats actually published by your screenshot tool.** Enumerate
-   `Clipboard::GetDataObject().GetFormats()` after a real screenshot, to confirm whether
-   the `PNG` branch or the DIB fallback is the live path.
-3. **Which ssh client authenticates** — `ssh.exe` vs `wsl.exe -e ssh` — so the installer's
-   detection is validated against a known answer rather than trusted blind.
-4. **Binary integrity over `ssh` stdin**: ship a known PNG and compare hashes end to end.
-   Cheap, and it is the failure mode PowerShell is notorious for.
+| # | Item | Result |
+|---|---|---|
+| 1 | `SendText` survives Windows Terminal → mosh → tmux → Claude Code | **Pass.** The full 45-character path arrived complete and in order in Input mode. Event mode was not needed. |
+| 2 | Which clipboard formats the screenshot tool publishes | **`PNG` stream present.** Formats: `System.Drawing.Bitmap`, `Bitmap`, `PNG`, `CanUploadToCloudClipboard`, `CanIncludeInClipboardHistory`. The lossless branch is the live path; `file` confirmed `8-bit/color RGBA` on the far side, so alpha survived. |
+| 3 | Which ssh client authenticates | **`ssh.exe` only.** `wsl.exe -e ssh` returns `Permission denied (publickey)` — the 1Password agent serves the Windows client, and WSL has no key. A guess had even odds of picking a transport that cannot authenticate. |
+| 4 | PNG byte integrity over `ssh` stdin | **Pass.** 10200 bytes, identical sha256 end to end via `Start-Process -RedirectStandardInput`. |
+
+**A fifth fact was established by accident, and it is the one that closes the design.**
+Claude Code scans pasted and typed text for file paths that exist on the local filesystem,
+attaches any image it finds, and removes the path from the message. Observed directly:
+`paste-cache` recorded the pasted text at `04:04:34.675` with the Linux path stripped
+mid-line, and `image-cache/<session>/1.png` was written 10 ms later at `04:04:34.685` with
+a hash identical to the transferred file. A Windows path in the same paste survived
+untouched, because it does not exist on this filesystem.
+
+So the consumption half of clipbridge needs no cooperation from anything: put the file on
+the box, put its path in the prompt, and the image arrives. This was previously an
+inference; it is now an observation.
+
+Transport is therefore **pinned to `ssh.exe`** at install time by detection, exactly as
+designed — the installer's probe is kept because the answer is machine-specific, not
+because it is unknown here.
 
 ## Security
 
