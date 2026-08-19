@@ -188,7 +188,12 @@ function Select-Transport {
 function Invoke-TransportProbe {
     param(
         [Parameter(Mandatory)][string] $Exe,
-        [Parameter(Mandatory)][string[]] $Prefix,
+        # AllowEmptyCollection is required, not decorative: ssh.exe takes no prefix and
+        # is called with @(). PowerShell treats an empty array as "not supplied" for a
+        # Mandatory parameter and fails the bind with "Cannot bind argument to parameter
+        # 'Prefix' because it is an empty array" - so without this the FIRST probe, and
+        # the one that actually works on the target laptop, dies before it runs.
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]] $Prefix,
         [Parameter(Mandatory)][string] $TargetHost,
         [int] $ConnectTimeoutSeconds = 5
     )
