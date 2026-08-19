@@ -109,7 +109,28 @@ RunClipbridge() {
         return false
     }
 
-    SendText(path . " ")
+    ; PASTE the path, do not type it. Claude Code scans PASTED text for image paths
+    ; that exist on the remote filesystem and attaches the image; text that arrives as
+    ; keystrokes is never scanned. Measured 2026-08-19: three SendText attempts placed
+    ; the path in the prompt correctly and attached nothing, while the identical path
+    ; pasted attached immediately. SendText delivers the characters intact -- that was
+    ; verified early and is still true -- but delivering the characters is not the
+    ; property that matters here.
+    ;
+    ; The image is already on devsbx01 by this point, so overwriting the clipboard
+    ; costs nothing, but the previous contents are restored anyway: a paste tool that
+    ; silently eats what you had on the clipboard is its own kind of surprise.
+    prev := ClipboardAll()
+    A_Clipboard := path . " "
+    if (!ClipWait(2, 0)) {
+        A_Clipboard := prev
+        SoundBeep(300, 200)
+        TrayTip("clipbridge could not set the clipboard", "clipbridge", 3)
+        return false
+    }
+    Send("^v")
+    Sleep(200)              ; let the target consume the paste before restoring
+    A_Clipboard := prev
     SoundBeep(900, 60)
     return true
 }
