@@ -173,3 +173,9 @@ jobs:
             exit 1
           }
           Write-Host "--install terminated cleanly with a handled exit code"
+
+          # Explicit exit 0: GitHub's pwsh wrapper ends the step with an implicit
+          # `exit $LASTEXITCODE`, and --install's deliberate exit 1 is still sitting
+          # in that variable at this point. Without this the step fails on a value
+          # the assertions above already inspected and accepted.
+          exit 0
