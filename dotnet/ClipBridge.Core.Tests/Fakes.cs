@@ -44,7 +44,13 @@ internal sealed class FakeClipboard : IClipboard
 internal sealed class FakePasteSink : IPasteSink
 {
     public int PasteCount;
-    public void SendPaste() => PasteCount++;
+    public Exception? ThrowOnSend;
+
+    public void SendPaste()
+    {
+        PasteCount++;
+        if (ThrowOnSend is not null) throw ThrowOnSend;
+    }
 }
 
 internal sealed class FakeSshTransport : ISshTransport
