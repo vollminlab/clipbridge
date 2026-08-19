@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace ClipBridge.Core;
 
 public static class ClipbridgeLogger
@@ -10,6 +12,15 @@ public static class ClipbridgeLogger
     // trailing 'Z' sits at index StampLength and is deliberately outside the
     // compared prefix, so adding it did not disturb the comparison.
     private const int StampLength = 19;
+
+    // Formatted with InvariantCulture, not the ambient one. A custom format
+    // string takes ':' from the current culture's TimeSeparator, so under a
+    // locale such as fi-FI this stamp renders as 2026-08-19T04.30.00 - measured.
+    // Width and ordinal sort happen to survive that, but the retention filter
+    // compares these stamps as text, and a format this load-bearing should not
+    // vary with a machine setting. ClipBridge.App sets InvariantGlobalization,
+    // which would also mask it; pinning it here means Core does not depend on a
+    // property set in a different assembly.
 
     // Capped at 7 days, same rule as the images (design spec). Each line
     // starts with a fixed-width, sortable stamp, so a plain ordinal string
@@ -55,8 +66,8 @@ public static class ClipbridgeLogger
         // messages, and this log is the only record of a failure the user
         // never otherwise sees.
         var oneLine = message.ReplaceLineEndings(" | ");
-        var line = $"{effectiveNow.ToString(StampFormat)}Z  {oneLine}";
-        var cutoff = effectiveNow.Subtract(Retention).ToString(StampFormat);
+        var line = $"{effectiveNow.ToString(StampFormat, CultureInfo.InvariantCulture)}Z  {oneLine}";
+        var cutoff = effectiveNow.Subtract(Retention).ToString(StampFormat, CultureInfo.InvariantCulture);
 
         var kept = new List<string>();
         if (File.Exists(logPath))
