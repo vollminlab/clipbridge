@@ -153,3 +153,18 @@ Describe 'Select-Transport' {
             Should -Throw -ExpectedMessage '*1Password*'
     }
 }
+
+Describe 'Invoke-TransportProbe parameter binding' {
+    # This function spawns a process, so its I/O is not unit-testable -- but its
+    # parameter CONTRACT is, and that is where the bug was. A nonexistent executable
+    # returns at the Get-Command guard before anything is spawned, so this exercises
+    # the bind and nothing else.
+    It 'accepts an empty prefix, which is how ssh.exe is probed' {
+        $r = Invoke-TransportProbe -Exe 'clipbridge-no-such-exe-9f3a' -Prefix @() -TargetHost 'nowhere.invalid'
+        $r.ExeFound | Should -BeFalse
+    }
+    It 'accepts a populated prefix, which is how wsl.exe is probed' {
+        $r = Invoke-TransportProbe -Exe 'clipbridge-no-such-exe-9f3a' -Prefix @('-e','ssh') -TargetHost 'nowhere.invalid'
+        $r.ExeFound | Should -BeFalse
+    }
+}
