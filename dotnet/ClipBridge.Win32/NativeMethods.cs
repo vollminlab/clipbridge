@@ -293,7 +293,16 @@ internal static partial class NativeMethods
         public uint uFlags;
         public uint uCallbackMessage;
         public IntPtr hIcon;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string szTip;
+        // szTip is 64, not 128. Shell_NotifyIcon validates cbSize against the sizes of
+        // its known struct versions and returns FALSE - silently - if it matches none.
+        // These seven fields are exactly NOTIFYICONDATAW's V1 field set, but with
+        // szTip[128] the struct measures 296 bytes, which is V1's fields at V2's tip
+        // length and therefore matches no version at all: V1=168, V2=952, V3=968,
+        // current=976. At szTip[64] it measures exactly 168 = NOTIFYICONDATAW_V1_SIZE.
+        // V1 supports NIF_MESSAGE|NIF_ICON|NIF_TIP, which is all this tray icon uses
+        // (no balloon, no GUID), and the tip is the literal "clipbridge" - 10 of the
+        // 63 usable characters. Measured, not derived.
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string szTip;
     }
 
     // Kept on DllImport alongside the hook calls: RegisterClassW takes a
