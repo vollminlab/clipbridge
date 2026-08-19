@@ -214,3 +214,35 @@ Describe 'Get-NonBlankLines' {
         Get-NonBlankLines "`n/home/vollmin/.clipbridge/x.png`n`n" | Should -HaveCount 1
     }
 }
+
+Describe 'Resolve-RemotePath' {
+    # Literals are inlined on purpose. A Describe-scoped $path does NOT reach these
+    # It blocks -- Pester 5+ runs the Describe body at discovery time, so the variable
+    # is empty at run time and assertions compare empty to empty and pass vacuously.
+    # These test the resolver directly; an earlier version wrapped with @() itself and
+    # therefore passed with AND without the fix, certifying the bug instead of catching it.
+    It 'returns the whole path for one line, not its first character' {
+        $r = Resolve-RemotePath -StdOut "/home/vollmin/.clipbridge/20260819-032734.png`n"
+        $r.Path   | Should -Be '/home/vollmin/.clipbridge/20260819-032734.png'
+        $r.Reason | Should -BeNullOrEmpty
+    }
+    It 'survives CRLF, which ssh on Windows can deliver' {
+        $r = Resolve-RemotePath -StdOut "/home/vollmin/.clipbridge/20260819-032734.png`r`n"
+        $r.Path | Should -Be '/home/vollmin/.clipbridge/20260819-032734.png'
+    }
+    It 'handles output with no trailing newline' {
+        $r = Resolve-RemotePath -StdOut '/home/vollmin/.clipbridge/20260819-032734.png'
+        $r.Path | Should -Be '/home/vollmin/.clipbridge/20260819-032734.png'
+    }
+    It 'rejects two real lines and says how many it saw' {
+        $r = Resolve-RemotePath -StdOut "/home/vollmin/.clipbridge/a.png`n/home/vollmin/.clipbridge/b.png`n"
+        $r.Path   | Should -BeNullOrEmpty
+        $r.Reason | Should -Match '2 non-blank line'
+    }
+    It 'rejects a relative path' {
+        (Resolve-RemotePath -StdOut "clipbridge/x.png`n").Path | Should -BeNullOrEmpty
+    }
+    It 'rejects empty output' {
+        (Resolve-RemotePath -StdOut '').Path | Should -BeNullOrEmpty
+    }
+}
