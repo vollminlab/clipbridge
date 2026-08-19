@@ -14,7 +14,12 @@
 #>
 [CmdletBinding()]
 param(
-    [string] $TargetHost = 'devsbx01',
+    # FQDN, not the bare name. This value becomes HostName in the generated block, and
+    # HostName is resolved by DNS directly -- it is NOT matched against other Host
+    # aliases in the config. The user's own working block uses the FQDN, and their
+    # verbose ssh trace confirms devsbx01.vollminlab.com is what actually resolves; a
+    # bare name would depend on a DNS search suffix that has not been verified.
+    [string] $TargetHost = 'devsbx01.vollminlab.com',
     [string] $TargetUser = 'vollmin',
     [string] $HostAlias  = 'clipbridge',
 
