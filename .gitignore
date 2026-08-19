@@ -4,3 +4,7 @@
 
 # git worktrees used during development
 .worktrees/
+
+# .NET build output
+bin/
+obj/
