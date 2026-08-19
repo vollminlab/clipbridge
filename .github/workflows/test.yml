@@ -76,3 +76,54 @@ jobs:
             Write-Error "powershell 5.1 run: $($result.FailedCount) failed, $($result.SkippedCount) skipped (want 0 and 0)"
             exit 1
           }
+
+  dotnet-core:
+    name: dotnet-core (linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Test ClipBridge.Core (portable, no Windows APIs)
+        working-directory: dotnet
+        run: dotnet test ClipBridge.Core.Tests/ClipBridge.Core.Tests.csproj --logger "console;verbosity=normal"
+
+      # Release specifically, not just Debug: ImageSharp 4.x ships a build-time
+      # licence gate that is a hard ERROR in Release and only a warning in Debug,
+      # so a Debug-only check would let an accidental unpin through and break
+      # publish. Also proves the trim/AOT analyzer stays quiet.
+      - name: Build Release + AOT analyzer
+        working-directory: dotnet
+        run: |
+          dotnet build -c Release
+          dotnet build ClipBridge.Core/ClipBridge.Core.csproj -c Release -p:IsAotCompatible=true
+
+  dotnet-win32:
+    name: dotnet-win32 (windows, AOT publish)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # The only place the P/Invokes are genuinely exercised. A green
+      # `dotnet test` on Linux for a net10.0-windows project proves the code
+      # compiled and the harness did not crash - it does not call user32.dll.
+      - name: Test ClipBridge.Win32 (real Win32 calls)
+        working-directory: dotnet
+        run: dotnet test ClipBridge.Win32.Tests/ClipBridge.Win32.Tests.csproj --logger "console;verbosity=normal"
+
+      # NativeAOT cannot cross-compile: publishing win-x64 from Linux fails with
+      # "Cross-OS native compilation is not supported", so this job is the only
+      # place the AOT toolchain runs at all. The flags are passed on the command
+      # line rather than set in the csproj on purpose - Task 21 moves them into
+      # ClipBridge.App.csproj properly. Running the produced binary is the point:
+      # AOT + P/Invoke + ImageSharp is the least-travelled combination in this
+      # design, and a publish that links is not the same as a binary that runs.
+      - name: AOT publish smoke test
+        working-directory: dotnet
+        run: |
+          dotnet publish ClipBridge.App/ClipBridge.App.csproj -c Release -r win-x64 --self-contained -p:PublishAot=true
+          .\ClipBridge.App\bin\Release\net10.0-windows\win-x64\publish\ClipBridge.App.exe
