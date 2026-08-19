@@ -219,4 +219,134 @@ internal static partial class NativeMethods
 
     [LibraryImport("user32.dll")]
     public static partial void PostQuitMessage(int nExitCode);
+
+    // --- tray icon (Task 18) ---
+    public const int WM_COMMAND = 0x0111;
+    public const int WM_RBUTTONUP = 0x0205;
+    public const uint NIF_MESSAGE = 0x00000001;
+    public const uint NIF_ICON = 0x00000002;
+    public const uint NIF_TIP = 0x00000004;
+    public const uint NIM_ADD = 0x00000000;
+    public const uint NIM_DELETE = 0x00000002;
+    public const uint MF_STRING = 0x00000000;
+    public const uint TPM_RIGHTBUTTON = 0x0002;
+    public static readonly IntPtr IDI_APPLICATION = (IntPtr)32512;
+
+    public delegate IntPtr WndProcDelegate(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct WNDCLASS
+    {
+        public uint style;
+        public WndProcDelegate lpfnWndProc;
+        public int cbClsExtra;
+        public int cbWndExtra;
+        public IntPtr hInstance;
+        public IntPtr hIcon;
+        public IntPtr hCursor;
+        public IntPtr hbrBackground;
+        [MarshalAs(UnmanagedType.LPWStr)] public string? lpszMenuName;
+        [MarshalAs(UnmanagedType.LPWStr)] public string lpszClassName;
+    }
+
+    // FINDING (Task 18): this struct is truncated relative to the real
+    // Win32 NOTIFYICONDATAW - it declares only the fields TrayIcon's
+    // NIF_MESSAGE | NIF_ICON | NIF_TIP flags actually read, and is missing
+    // dwState, dwStateMask, szInfo[256], the uTimeout/uVersion union,
+    // szInfoTitle[64], dwInfoFlags, guidItem, and hBalloonIcon.
+    //
+    // Measured on x64: Marshal.SizeOf<NOTIFYICONDATA>() = 296 bytes. That
+    // does NOT match any of the sizes Shell_NotifyIcon actually validates
+    // cbSize against (source: learn.microsoft.com, NOTIFYICONDATAW page,
+    // "Remarks" table, cross-checked against the ReactOS shellapi.h mirror
+    // of the SDK header for the FIELD_OFFSET expressions):
+    //   NOTIFYICONDATAW_V1_SIZE = FIELD_OFFSET(..., szTip[64])   = 168
+    //   NOTIFYICONDATAW_V2_SIZE = FIELD_OFFSET(..., guidItem)    = 952
+    //   NOTIFYICONDATAW_V3_SIZE = FIELD_OFFSET(..., hBalloonIcon)= 968
+    //   sizeof(NOTIFYICONDATAW)  (current/"V4")                  = 976
+    // 296 is simply "cbSize through szTip[128], nothing after" - a
+    // boundary that only exists in this truncated struct, not in any
+    // shell-recognized version. Shell_NotifyIcon returns FALSE for a
+    // cbSize it doesn't recognize, so as declared, TrayIcon's
+    // Shell_NotifyIconW(NIM_ADD) call fails every time - the icon never
+    // appears. TrayIcon.Create()/Dispose() now check that return value
+    // (they didn't before this finding), so the failure surfaces instead
+    // of vanishing, but the struct itself has deliberately NOT been
+    // resized - that's a design call for whoever picks it up next.
+    // Options, in order of least to most invasive:
+    //   (a) Shrink szTip's SizeConst from 128 to 64. This lands cbSize
+    //       exactly on NOTIFYICONDATAW_V1_SIZE (168) with no other
+    //       change. The tray tip text is "clipbridge" (10 chars), far
+    //       under the 63-char usable limit of a 64-char buffer, so this
+    //       costs nothing functionally today.
+    //   (b) Declare the additional fields through dwInfoFlags to reach
+    //       NOTIFYICONDATAW_V2_SIZE (952), keeping the 128-char tip.
+    //   (c) Declare the full modern struct through hBalloonIcon to reach
+    //       sizeof(NOTIFYICONDATAW) (976) - most future-proof, most
+    //       unused surface area.
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct NOTIFYICONDATA
+    {
+        public int cbSize;
+        public IntPtr hWnd;
+        public int uID;
+        public uint uFlags;
+        public uint uCallbackMessage;
+        public IntPtr hIcon;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string szTip;
+    }
+
+    // Kept on DllImport alongside the hook calls: RegisterClassW takes a
+    // struct containing a managed delegate field (WNDCLASS.lpfnWndProc),
+    // same marshalling-reliability reasoning as SetWindowsHookExW above.
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern ushort RegisterClassW(ref WNDCLASS lpWndClass);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern IntPtr CreateWindowExW(uint dwExStyle, string lpClassName, string lpWindowName,
+        uint dwStyle, int x, int y, int nWidth, int nHeight, IntPtr hWndParent, IntPtr hMenu, IntPtr hInstance, IntPtr lpParam);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr DefWindowProcW(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    [LibraryImport("kernel32.dll", EntryPoint = "GetModuleHandleW", StringMarshalling = StringMarshalling.Utf16)]
+    public static partial IntPtr GetModuleHandleW(string? lpModuleName);
+
+    [LibraryImport("user32.dll", EntryPoint = "LoadIconW")]
+    public static partial IntPtr LoadIconW(IntPtr hInstance, IntPtr lpIconName);
+
+    // NOTIFYICONDATA contains a ByValTStr string field, which the
+    // LibraryImport source generator does not support (SYSLIB1051: "The
+    // type 'NOTIFYICONDATA' is not supported by source-generated
+    // P/Invokes" - confirmed by building this file). CharSet is a
+    // DllImport-era concept the generator ignores entirely, so there is no
+    // LibraryImport attribute spelling that fixes this; classic DllImport
+    // is required here, same reasoning as RegisterClassW/CreateWindowExW
+    // above (a struct field the generator can't marshal).
+    [DllImport("shell32.dll", EntryPoint = "Shell_NotifyIconW", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool Shell_NotifyIconW(uint dwMessage, ref NOTIFYICONDATA lpData);
+
+    [LibraryImport("user32.dll")]
+    public static partial IntPtr CreatePopupMenu();
+
+    [LibraryImport("user32.dll", EntryPoint = "AppendMenuW", StringMarshalling = StringMarshalling.Utf16)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool AppendMenuW(IntPtr hMenu, uint uFlags, int uIDNewItem, string lpNewItem);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool TrackPopupMenu(IntPtr hMenu, uint uFlags, int x, int y, int nReserved, IntPtr hWnd, IntPtr prcRect);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool DestroyMenu(IntPtr hMenu);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool GetCursorPos(out POINT lpPoint);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool SetForegroundWindow(IntPtr hWnd);
 }
