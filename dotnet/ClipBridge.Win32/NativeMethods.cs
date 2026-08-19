@@ -318,10 +318,19 @@ internal static partial class NativeMethods
     // Kept on DllImport alongside the hook calls: RegisterClassW takes a
     // struct containing a managed delegate field (WNDCLASS.lpfnWndProc),
     // same marshalling-reliability reasoning as SetWindowsHookExW above.
-    [DllImport("user32.dll", SetLastError = true)]
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     public static extern ushort RegisterClassW(ref WNDCLASS lpWndClass);
 
-    [DllImport("user32.dll", SetLastError = true)]
+    // CharSet.Unicode is REQUIRED, not decorative. DllImport defaults to
+    // CharSet.Ansi, so without it these `string` parameters marshal as ANSI
+    // into the *W* (wide) entry point: the class name arrives as mojibake and
+    // CreateWindowExW fails with ERROR_CANNOT_FIND_WND_CLASS (1407). It fails
+    // only here and not in RegisterClassW because WNDCLASS.lpszClassName
+    // carries an explicit [MarshalAs(UnmanagedType.LPWStr)], so the class is
+    // registered under the correct UTF-16 name and then looked up under a
+    // mangled ANSI one. Caught by the windows-latest CI smoke test, which is
+    // the only place this code runs at all.
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     public static extern IntPtr CreateWindowExW(uint dwExStyle, string lpClassName, string lpWindowName,
         uint dwStyle, int x, int y, int nWidth, int nHeight, IntPtr hWndParent, IntPtr hMenu, IntPtr hInstance, IntPtr lpParam);
 
