@@ -5,6 +5,15 @@ namespace ClipBridge.Win32.Tests;
 
 public class SshTransportTests
 {
+    // These three tests are about stdout/exit-code capture, byte fidelity and
+    // deadlock-freedom - not about the timeout, which has its own test below.
+    // They pass an explicit, generous timeout so they cannot fail for the wrong
+    // reason: a GitHub-hosted runner measured ~14x slower than a healthy one on
+    // 2026-08-19 turned a normally-2s case into a 30s timeout failure. Binding a
+    // behaviour test to the production default silently asserts "CI is never
+    // slow", which is not a property we want to test or rely on.
+    private static SshTransport NewTransport() => new(timeout: TimeSpan.FromMinutes(3));
+
     [WindowsFact]
     public void Captures_exit_code_and_stdout()
     {
@@ -12,12 +21,13 @@ public class SshTransportTests
         File.WriteAllBytes(tmp, new byte[] { 0x89, 0x50, 0x4E, 0x47 });
         try
         {
-            var transport = new SshTransport();
+            var transport = NewTransport();
             var result = transport.Send("powershell.exe",
                 new[] { "-NoProfile", "-Command", "$null = $input; Write-Output 'ok'" },
                 tmp);
 
-            Assert.Equal(0, result.ExitCode);
+            Assert.True(result.ExitCode == 0,
+                $"expected exit 0, got {result.ExitCode}; stderr={result.StdErr}");
             Assert.Contains("ok", result.StdOut);
         }
         finally
@@ -34,7 +44,7 @@ public class SshTransportTests
         File.WriteAllBytes(tmp, payload);
         try
         {
-            var transport = new SshTransport();
+            var transport = NewTransport();
             // Echo stdin back as base64 on stdout so the comparison never
             // depends on a text encoding assumption anywhere in the pipe.
             var result = transport.Send("powershell.exe",
@@ -99,7 +109,7 @@ public class SshTransportTests
         File.WriteAllBytes(tmp, new byte[] { 1, 2, 3 });
         try
         {
-            var transport = new SshTransport();
+            var transport = NewTransport();
             var result = transport.Send("powershell.exe",
                 new[]
                 {
