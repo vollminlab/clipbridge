@@ -4,6 +4,10 @@
     <ProjectReference Include="..\ClipBridge.Core\ClipBridge.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="ClipBridge.Win32.Tests" />
+  </ItemGroup>
+
   <PropertyGroup>
     <TargetFramework>net10.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>

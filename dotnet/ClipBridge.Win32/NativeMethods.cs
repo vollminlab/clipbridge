@@ -57,6 +57,14 @@ internal static partial class NativeMethods
     [LibraryImport("kernel32.dll", SetLastError = true)]
     public static partial IntPtr GlobalAlloc(uint uFlags, nuint dwBytes);
 
+    // Returns NULL on success (the handle is freed), non-NULL on failure -
+    // opposite polarity from most of this file. Used only to release a
+    // GlobalAlloc block that failed to make it onto the clipboard via
+    // SetClipboardData; once SetClipboardData succeeds, the system owns
+    // the handle and this must not be called on it.
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    public static partial IntPtr GlobalFree(IntPtr hMem);
+
     [LibraryImport("kernel32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool Beep(uint dwFreq, uint dwDuration);
