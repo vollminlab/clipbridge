@@ -1,3 +1,6 @@
 *.log
 *.png
 !docs/**/*.png
+
+# git worktrees used during development
+.worktrees/
