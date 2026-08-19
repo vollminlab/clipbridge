@@ -21,8 +21,8 @@ public class ClipbridgeLoggerTests : IDisposable
     public void Drops_lines_older_than_7_days_and_keeps_fresh_ones()
     {
         var logPath = Path.Combine(_dir, "clipbridge.log");
-        var stale = DateTime.Now.AddDays(-10).ToString("yyyy-MM-ddTHH:mm:ss");
-        var fresh = DateTime.Now.AddDays(-1).ToString("yyyy-MM-ddTHH:mm:ss");
+        var stale = DateTime.UtcNow.AddDays(-10).ToString("yyyy-MM-ddTHH:mm:ss");
+        var fresh = DateTime.UtcNow.AddDays(-1).ToString("yyyy-MM-ddTHH:mm:ss");
         File.WriteAllLines(logPath, new[] { $"{stale}  old event", $"{fresh}  recent event" });
 
         ClipbridgeLogger.Append(_dir, "new event");
@@ -79,9 +79,10 @@ public class ClipbridgeLoggerTests : IDisposable
         var line = File.ReadAllLines(Path.Combine(_dir, "clipbridge.log")).Last();
 
         // Stamp format "yyyy-MM-ddTHH:mm:ss" is exactly 19 characters.
-        Assert.Equal(' ', line[19]);
+        Assert.Equal('Z', line[19]);
         Assert.Equal(' ', line[20]);
-        Assert.NotEqual(' ', line[21]);
+        Assert.Equal(' ', line[21]);
+        Assert.NotEqual(' ', line[22]);
     }
 
     [Fact]
@@ -106,4 +107,55 @@ public class ClipbridgeLoggerTests : IDisposable
         Assert.Contains("after rollover", text);
         Assert.Contains("new event", text);
     }
+    [Fact]
+    public void Collapses_a_multi_line_message_so_the_next_append_cannot_shred_it()
+    {
+        // Before this, a newline in the message wrote a second physical line
+        // with no stamp, and the NEXT Append silently deleted it. Exception
+        // messages routinely contain newlines.
+        ClipbridgeLogger.Append(_dir, "ssh failed\nCaused by: connection reset");
+        ClipbridgeLogger.Append(_dir, "second event");
+
+        var lines = File.ReadAllLines(Path.Combine(_dir, "clipbridge.log"));
+        Assert.Equal(2, lines.Length);
+        Assert.Contains("Caused by: connection reset", lines[0]);
+        Assert.Contains("second event", lines[1]);
+    }
+
+    [Theory]
+    [InlineData("a\nb")]
+    [InlineData("a\r\nb")]
+    [InlineData("a\rb")]
+    public void Collapses_every_line_ending_form(string message)
+    {
+        ClipbridgeLogger.Append(_dir, message);
+        ClipbridgeLogger.Append(_dir, "next");
+
+        var lines = File.ReadAllLines(Path.Combine(_dir, "clipbridge.log"));
+        Assert.Equal(2, lines.Length);
+        Assert.Contains("b", lines[0]);
+    }
+
+    [Fact]
+    public void Marks_the_stamp_as_utc_so_the_log_does_not_misreport_the_time()
+    {
+        ClipbridgeLogger.Append(_dir, "event");
+        var line = File.ReadAllLines(Path.Combine(_dir, "clipbridge.log")).Last();
+        Assert.Equal('Z', line[19]);
+    }
+
+    [Fact]
+    public void Stamps_in_utc_not_local_time()
+    {
+        // NOTE: this assertion can only FAIL on a host whose local time differs
+        // from UTC. This box runs Etc/UTC and GitHub's runners are UTC too, so
+        // here it passes either way - it earns its keep on a developer machine
+        // in any other zone, where a regression to DateTime.Now breaks it.
+        ClipbridgeLogger.Append(_dir, "event");
+        var line = File.ReadAllLines(Path.Combine(_dir, "clipbridge.log")).Last();
+        var stamped = DateTime.ParseExact(line[..19], "yyyy-MM-ddTHH:mm:ss", null);
+        Assert.True(Math.Abs((stamped - DateTime.UtcNow).TotalMinutes) < 2,
+            $"stamp {stamped:O} is not UTC-current; local offset is {TimeZoneInfo.Local.BaseUtcOffset}");
+    }
+
 }
