@@ -1,9 +1,39 @@
 # clipbridge — architecture
 
-**Date:** 2026-08-18
-**Status:** Design approved and fully verified. `clipbridge-recv` and `Send-Clip.ps1` are
-implemented (on `feat/receiver` and `feat/windows-grabber`, not yet merged). `clipbridge.ahk`
-is specified below but does not exist yet — see the design spec's Task list for what remains.
+**Date:** 2026-08-19
+**Status:** v1 is built, merged and in day-to-day use. v2 (`dotnet/`) is merged and verified on
+`windows-latest` CI, but has **not** yet been exercised on the laptop, so v1 remains the
+installed tool. See "v2 status" below.
+
+## v2 status
+
+`clipbridge.exe` (`dotnet/`, `win-x64`, `PublishAot`) replaces `Send-Clip.ps1` +
+`Install-Clipbridge.ps1` + `clipbridge.ahk` with one resident process, cutting the per-paste
+cost from ~3.0s (almost entirely `powershell.exe` startup, per keypress) to the ssh round trip
+alone. Rationale and architecture: `docs/superpowers/specs/clipbridge-csharp-design.md`;
+task-by-task build: `docs/superpowers/plans/clipbridge-csharp-implementation.md`.
+
+`clipbridge-recv` is **unchanged**. The wire protocol — PNG on stdin, one absolute path on
+stdout — never depended on what was sending it, which is why the rewrite touched neither the
+receiver nor the Linux side at all.
+
+**v1 stays installed until v2 is proven in real use.** They coexist safely: v1 only acts while
+its AutoHotkey script is loaded. What CI proves and what it does not:
+
+| Proven on `windows-latest` | Only provable on the laptop |
+|---|---|
+| Clipboard PNG/DIB extraction, capture/restore, set-text | Does a physical `Ctrl+V` in Windows Terminal get swallowed |
+| `SendInput` accepts all four Ctrl+V events | Does the pasted path actually attach the image in a prompt |
+| Foreground-window process lookup | Does the hook survive real foreground-window churn |
+| ssh transport: byte fidelity, large stderr, timeout | Does it survive 1Password agent lock/unlock cycles |
+| AOT publish, and the binary starting and staying resident | Does the tray menu behave |
+
+The startup assertion is stronger than it looks: `RegisterClassW`, `CreateWindowExW`,
+`SetWindowsHookExW` and `Shell_NotifyIconW` each throw on failure, so "still resident after 15s"
+means all four succeeded on a real Windows host.
+
+Cutover criteria — deleting `windows/` — are Task 24 of the implementation plan, and are
+explicitly gated on day-to-day use rather than on green CI.
 
 ## What this is and why it exists
 
@@ -22,7 +52,7 @@ Each owns exactly one concern. Nothing does two jobs.
 |---|---|---|---|
 | `clipbridge-recv` | `devsbx01` | Validate, store, prune. Storage only. | Implemented |
 | `Send-Clip.ps1` | Windows laptop | Clipboard extraction, transport to `devsbx01`. | Implemented |
-| `clipbridge.ahk` | Windows laptop | Hotkey binding, invoking the grabber, typing the result into the focused window. | **Not yet built** — specified in the design doc, not implemented |
+| `clipbridge.ahk` | Windows laptop | Hotkey binding, invoking the grabber, pasting the result into the focused window. | Implemented (superseded by v2 once proven) |
 
 `clipbridge-recv` (POSIX `sh`, `~/.local/bin/clipbridge-recv` on `devsbx01`) reads a PNG on
 stdin, writes it to `~/.clipbridge/<timestamp>.png`, prunes old files, and prints the absolute
@@ -34,9 +64,11 @@ lossless `PNG` clipboard format over the DIB fallback, streams the bytes to `dev
 `ssh.exe`, and writes the single returned path to `%LOCALAPPDATA%\clipbridge\last-path.txt`.
 
 `clipbridge.ahk` is where `Ctrl+V` gets scoped to the terminal window, `Send-Clip.ps1` gets
-run hidden, and the returned path gets typed into whatever has focus. It is described here as
-designed, not as built, because it isn't built. Describing it otherwise would be documenting
-the plan instead of the code.
+run hidden, and the returned path gets **pasted** into whatever has focus. Pasted, not typed:
+Claude Code scans *pasted* text for image paths that exist on the local filesystem and attaches
+the image, and text arriving as keystrokes is never scanned. Measured 2026-08-19 — three
+`SendText` attempts placed a correct path in the prompt and attached nothing; the identical
+path pasted attached instantly.
 
 ## Data flow
 
