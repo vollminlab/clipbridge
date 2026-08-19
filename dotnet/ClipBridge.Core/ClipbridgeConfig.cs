@@ -46,10 +46,18 @@ public static class ClipbridgeConfigReader
             // syntax-error and missing-field cases, always naming the file path.
             string? transport;
             string? sshHost;
+            // transportDisplay keeps the raw text of whatever was in the file so the
+            // error message can quote it. Without it a non-string transport reports
+            // "unknown transport ''" and tells the user nothing about what they
+            // actually wrote - v1 quoted the value, and losing that is a regression
+            // in the diagnostic even though the exception type is right.
+            string transportDisplay;
             try
             {
                 var root = doc.RootElement;
-                transport = root.TryGetProperty("transport", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() : null;
+                var hasTransport = root.TryGetProperty("transport", out var t);
+                transport = hasTransport && t.ValueKind == JsonValueKind.String ? t.GetString() : null;
+                transportDisplay = hasTransport && t.ValueKind != JsonValueKind.Null ? t.ToString() : "";
                 sshHost = root.TryGetProperty("sshHost", out var h) && h.ValueKind == JsonValueKind.String ? h.GetString() : null;
             }
             catch (InvalidOperationException ex)
@@ -59,7 +67,7 @@ public static class ClipbridgeConfigReader
 
             if (transport is not ("ssh" or "wsl"))
             {
-                throw new ClipbridgeConfigException($"clipbridge config at {path} has an unknown transport '{transport}' - expected ssh or wsl");
+                throw new ClipbridgeConfigException($"clipbridge config at {path} has an unknown transport '{transportDisplay}' - expected ssh or wsl");
             }
             if (string.IsNullOrWhiteSpace(sshHost))
             {

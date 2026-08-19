@@ -133,4 +133,14 @@ public class ClipbridgeConfigReaderTests : IDisposable
         Assert.Equal("clipbridge", cfg.SshHost);
         Assert.Equal("ssh", cfg.Transport);
     }
+    [Fact]
+    public void Quotes_the_offending_value_when_transport_is_not_a_string()
+    {
+        // v1 reported "unknown transport '5'". Dropping the value leaves the user
+        // with "unknown transport ''" and no idea what is actually in their file.
+        File.WriteAllText(Path.Combine(_dir, "config.json"), """{ "sshHost": "clipbridge", "transport": 5 }""");
+        var ex = Assert.Throws<ClipbridgeConfigException>(() => ClipbridgeConfigReader.Load(_dir));
+        Assert.Contains("'5'", ex.Message);
+    }
+
 }
