@@ -149,6 +149,24 @@ function Get-NonBlankLines {
     return @(($Text -split "`n") | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 }
 
+function Resolve-RemotePath {
+    param([string] $StdOut)
+    # This exists so the main body holds no parsing logic it cannot test. The bug it
+    # replaces: the main body did `$lines = Get-NonBlankLines ...` without @(), and
+    # PowerShell unrolls a single-element array on function output -- so $lines was the
+    # path STRING, .Count was 1 (strings report 1, so the count check passed), and
+    # $lines[0] was the first CHARACTER, "/". Every real path was rejected while the log
+    # printed a perfect-looking $stdout. Wrapping lives HERE, where tests reach it.
+    $lines = @(Get-NonBlankLines -Text $StdOut)
+    if ($lines.Count -ne 1) {
+        return [pscustomobject]@{ Path = $null; Reason = "receiver returned $($lines.Count) non-blank line(s), expected exactly 1: '$StdOut'" }
+    }
+    if (-not (Test-RemotePath $lines[0])) {
+        return [pscustomobject]@{ Path = $null; Reason = "unusable path from receiver: '$StdOut'" }
+    }
+    return [pscustomobject]@{ Path = $lines[0]; Reason = $null }
+}
+
 if ($DotSourceOnly) { return }
 
 # --------------------------- main -----------------------------------------
@@ -206,17 +224,18 @@ try {
         exit 4
     }
 
-    $lines = Get-NonBlankLines -Text $stdout
-    if ($lines.Count -ne 1) {
-        Write-ClipbridgeLog -ConfigDir $ConfigDir -Message "receiver returned $($lines.Count) non-blank line(s), expected exactly 1: '$stdout'"
+    # @(...) at the CALL SITE is required, not decorative. PowerShell unrolls a
+    # single-element array on function output, so without it $lines is the path
+    # STRING, not an array holding it: .Count is 1 (strings report Count 1, so the
+    # check below still passes) and $lines[0] indexes the first CHARACTER -- "/".
+    # Test-RemotePath then rejects "/" and the log prints $stdout, which looks
+    # perfect, while the value actually tested was one byte long.
+    $resolved = Resolve-RemotePath -StdOut $stdout
+    if (-not $resolved.Path) {
+        Write-ClipbridgeLog -ConfigDir $ConfigDir -Message $resolved.Reason
         exit 6
     }
-    $remote = $lines[0]
-    if (-not (Test-RemotePath $remote)) {
-        Write-ClipbridgeLog -ConfigDir $ConfigDir -Message "unusable path from receiver: '$stdout'"
-        exit 6
-    }
-
+    $remote = $resolved.Path
     if (-not (Test-Path $ConfigDir)) { New-Item -ItemType Directory -Path $ConfigDir -Force | Out-Null }
     # last-path.txt is only safe to read after this process has exited: Set-Content
     # truncates then writes, so the file is briefly empty mid-write, and this write
