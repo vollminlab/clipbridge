@@ -4,10 +4,25 @@
     <ProjectReference Include="..\ClipBridge.Core\ClipBridge.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="ClipBridge.Win32.Tests" />
+    <!-- Program.cs (Task 20) is the composition root and calls NativeMethods
+         directly for the message loop (GetMessageW/TranslateMessage/
+         DispatchMessageW/PostQuitMessage) and Beep - there is no public
+         wrapper for these, same reasoning as the Tests visibility above. -->
+    <InternalsVisibleTo Include="ClipBridge.App" />
+  </ItemGroup>
+
   <PropertyGroup>
     <TargetFramework>net10.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- Required by the LibraryImport source generator: SendInput's array
+         parameter marshalling emits pointer-arithmetic code, which the
+         generator wraps in `unsafe` blocks. Without this the build fails
+         with SYSLIB1062 on every LibraryImport in the file, not just
+         SendInput. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
 </Project>

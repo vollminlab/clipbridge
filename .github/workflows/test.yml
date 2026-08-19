@@ -126,4 +126,26 @@ jobs:
         working-directory: dotnet
         run: |
           dotnet publish ClipBridge.App/ClipBridge.App.csproj -c Release -r win-x64 --self-contained -p:PublishAot=true
-          .\ClipBridge.App\bin\Release\net10.0-windows\win-x64\publish\ClipBridge.App.exe
+          $exe = ".\ClipBridge.App\bin\Release\net10.0-windows\win-x64\publish\ClipBridge.App.exe"
+
+          # clipbridge is RESIDENT - tray icon plus a message pump - so a correct
+          # binary never exits on its own. Running it bare (which worked while
+          # Program.cs was still hello-world) would hang the job forever, and simply
+          # skipping the run would give up the only automated exercise this startup
+          # path ever gets. So: start it, let it get through RegisterClassW /
+          # CreateWindowExW / SetWindowsHookExW / Shell_NotifyIconW, and assert it is
+          # STILL ALIVE. An early exit means a startup failure.
+          #
+          # This is not hypothetical: it is exactly how CreateWindowExW's missing
+          # CharSet.Unicode was caught (ERROR_CANNOT_FIND_WND_CLASS, 1407). None of
+          # this code runs anywhere else - not on Linux, not in any unit test.
+          $p = Start-Process -FilePath $exe -PassThru -RedirectStandardOutput aot-out.txt -RedirectStandardError aot-err.txt
+          Start-Sleep -Seconds 15
+          if ($p.HasExited) {
+            Write-Host "--- stdout ---"; Get-Content aot-out.txt -ErrorAction SilentlyContinue
+            Write-Host "--- stderr ---"; Get-Content aot-err.txt -ErrorAction SilentlyContinue
+            Write-Error "ClipBridge.App.exe exited early with code $($p.ExitCode); a resident app should still be running"
+            exit 1
+          }
+          Write-Host "AOT binary still resident after 15s - startup path OK"
+          Stop-Process -Id $p.Id -Force
