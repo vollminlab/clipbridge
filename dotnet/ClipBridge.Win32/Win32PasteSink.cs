@@ -39,15 +39,30 @@ public sealed class Win32PasteSink : IPasteSink
         Thread.Sleep(PostSendSettleDelayMs);
     }
 
+    // dwExtraInfo carries NativeMethods.ClipbridgeSyntheticMarker on every
+    // event so KeyboardHook.HookCallback can recognize and ignore our own
+    // synthetic Ctrl+V - see the constant's doc comment for why this
+    // exists (without it, a failed transfer loops Ctrl+V forever).
     private static NativeMethods.INPUT KeyDown(ushort vk) => new()
     {
         type = NativeMethods.INPUT_KEYBOARD,
-        U = new NativeMethods.InputUnion { ki = new NativeMethods.KEYBDINPUT { wVk = vk } },
+        U = new NativeMethods.InputUnion
+        {
+            ki = new NativeMethods.KEYBDINPUT { wVk = vk, dwExtraInfo = NativeMethods.ClipbridgeSyntheticMarker },
+        },
     };
 
     private static NativeMethods.INPUT KeyUp(ushort vk) => new()
     {
         type = NativeMethods.INPUT_KEYBOARD,
-        U = new NativeMethods.InputUnion { ki = new NativeMethods.KEYBDINPUT { wVk = vk, dwFlags = NativeMethods.KEYEVENTF_KEYUP } },
+        U = new NativeMethods.InputUnion
+        {
+            ki = new NativeMethods.KEYBDINPUT
+            {
+                wVk = vk,
+                dwFlags = NativeMethods.KEYEVENTF_KEYUP,
+                dwExtraInfo = NativeMethods.ClipbridgeSyntheticMarker,
+            },
+        },
     };
 }

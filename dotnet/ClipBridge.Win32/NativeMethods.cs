@@ -9,16 +9,6 @@ internal static partial class NativeMethods
     public const uint CF_UNICODETEXT = 13;
     public const uint GMEM_MOVEABLE = 0x0002;
 
-    // LibraryImport (source-generated marshalling) is used everywhere it
-    // works cleanly. SetWindowsHookExW takes a managed delegate parameter;
-    // LibraryImport's source generator has narrower, less-documented
-    // support for delegate marshalling than classic DllImport, so that one
-    // call (and its two companions, which share the same hook handle type)
-    // stays on DllImport - both are fully AOT-compatible, this is a
-    // marshalling-reliability choice, not an AOT-compatibility one. Verify
-    // during Task 17 whether LibraryImport also works for it; if so this
-    // note can be deleted and the three calls converted.
-
     [LibraryImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool OpenClipboard(IntPtr hWndNewOwner);
@@ -75,18 +65,31 @@ internal static partial class NativeMethods
     [LibraryImport("user32.dll", SetLastError = true)]
     public static partial uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 
-    // --- kept on DllImport: see note above ---
     public delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
 
-    [DllImport("user32.dll", SetLastError = true)]
-    public static extern IntPtr SetWindowsHookExW(int idHook, LowLevelKeyboardProc lpfn, IntPtr hMod, uint dwThreadId);
+    // Task 17 verified LibraryImport marshals a managed delegate parameter
+    // cleanly on net10.0 (and is IsAotCompatible-clean too) - these three
+    // were on classic DllImport under a note suspecting narrower delegate
+    // support; that suspicion didn't hold here, so they're on
+    // LibraryImport like everything else in this file now.
+    [LibraryImport("user32.dll", SetLastError = true)]
+    public static partial IntPtr SetWindowsHookExW(int idHook, LowLevelKeyboardProc lpfn, IntPtr hMod, uint dwThreadId);
 
-    [DllImport("user32.dll", SetLastError = true)]
-    public static extern bool UnhookWindowsHookEx(IntPtr hhk);
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool UnhookWindowsHookEx(IntPtr hhk);
 
-    [DllImport("user32.dll")]
-    public static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
-    // --- end DllImport block ---
+    [LibraryImport("user32.dll")]
+    public static partial IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+
+    // High-order bit set = key currently down. Aggregates left/right for
+    // the generic VK_CONTROL/VK_SHIFT codes - unlike the hook's per-event
+    // vkCode, which only ever reports the left/right-distinguished codes
+    // (VK_LCONTROL/VK_RCONTROL/VK_LSHIFT/VK_RSHIFT), never the generic
+    // ones. See KeyboardHook for why this replaced event-based modifier
+    // tracking.
+    [LibraryImport("user32.dll")]
+    public static partial short GetAsyncKeyState(int vKey);
 
     [LibraryImport("user32.dll")]
     public static partial uint SendInput(uint nInputs, [In] INPUT[] pInputs, int cbSize);
@@ -97,6 +100,27 @@ internal static partial class NativeMethods
     public const int VK_CONTROL = 0x11;
     public const int VK_SHIFT = 0x10;
     public const int VK_V = 0x56;
+
+    // Stamped into KEYBDINPUT.dwExtraInfo by Win32PasteSink on every
+    // synthetic Ctrl+V it sends, and checked by KeyboardHook.HookCallback
+    // to ignore those events. Injected input (SendInput) is delivered to
+    // low-level keyboard hooks exactly like real input - that's what
+    // LLKHF_INJECTED exists to flag - so without this marker our own
+    // synthesized Ctrl+V re-enters our own hook. On a failed transfer the
+    // clipboard still holds the image (failure paths never overwrite it),
+    // so the re-entrant Ctrl+V would swallow again, retry, fail again, and
+    // loop forever. A marker on OUR OWN dwExtraInfo value is used instead
+    // of testing LLKHF_INJECTED because the flag can't distinguish our
+    // synthetic input from any other injected input (on-screen keyboard,
+    // remote desktop, accessibility tools) - testing it would also
+    // silently eat those legitimate keystrokes. This ignores exactly our
+    // own events and nothing else.
+    // IntPtr (not nuint/const) because dwExtraInfo on both KEYBDINPUT and
+    // KBDLLHOOKSTRUCT is IntPtr, and comparing/assigning through a shared
+    // static readonly IntPtr avoids re-deriving an unchecked nuint->IntPtr
+    // conversion (which overflows CS8778's compile-time nint range check
+    // for a value this large) at every call site.
+    public static readonly IntPtr ClipbridgeSyntheticMarker = unchecked((IntPtr)(nint)0x_C11B_B21DUL);
     public const uint INPUT_KEYBOARD = 1;
     public const uint KEYEVENTF_KEYUP = 0x0002;
 
