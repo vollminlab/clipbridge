@@ -220,6 +220,16 @@ internal static partial class NativeMethods
     [LibraryImport("user32.dll")]
     public static partial void PostQuitMessage(int nExitCode);
 
+    // Used by TrayIcon.RequestRehook (Task 20) to hop the watchdog timer's
+    // callback - which fires on a thread-pool thread - back onto the
+    // message-pump thread, where KeyboardHook.Rehook() must run. PostMessage
+    // queues and returns immediately without waiting for WndProc to process
+    // it, so it is safe to call from any thread, including a thread-pool
+    // timer callback.
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool PostMessageW(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
     // --- tray icon (Task 18) ---
     public const int WM_COMMAND = 0x0111;
     public const int WM_RBUTTONUP = 0x0205;

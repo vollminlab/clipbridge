@@ -18,6 +18,12 @@ namespace ClipBridge.Win32;
 public sealed class TrayIcon : IDisposable
 {
     private const int WM_APP_TRAYICON = 0x8000 + 1;
+    // Distinct WM_APP id, not reused with WM_APP_TRAYICON - Shell_NotifyIcon
+    // delivers WM_APP_TRAYICON with mouse-event info packed into lParam
+    // (see WndProc's `(int)lParam == WM_RBUTTONUP` check), and the rehook
+    // request carries no such payload. Sharing one id would mean either
+    // message could be misread as the other.
+    private const int WM_APP_REHOOK = 0x8000 + 2;
     private const int ID_OPEN_LOG = 1001;
     private const int ID_REINSTALL = 1002;
     private const int ID_EXIT = 1003;
@@ -35,6 +41,7 @@ public sealed class TrayIcon : IDisposable
     private readonly string _logPath;
     private readonly Action _onExit;
     private readonly Action _onReinstall;
+    private readonly Action? _onRehook;
 
     // Pinned for the same GC-collection reason as KeyboardHook's _proc: a
     // collected delegate means native code (the window procedure) calls a
@@ -42,13 +49,26 @@ public sealed class TrayIcon : IDisposable
     private readonly NativeMethods.WndProcDelegate _wndProc;
     private IntPtr _hwnd;
 
-    public TrayIcon(string logPath, Action onExit, Action onReinstall)
+    public TrayIcon(string logPath, Action onExit, Action onReinstall, Action? onRehook = null)
     {
         _logPath = logPath;
         _onExit = onExit;
         _onReinstall = onReinstall;
+        _onRehook = onRehook;
         _wndProc = WndProc;
     }
+
+    // Called by Program.cs's watchdog Timer callback, which runs on a
+    // thread-pool thread - never call onRehook (KeyboardHook.Rehook)
+    // directly from there. SetWindowsHookExW's docs state a low-level hook
+    // "can be called on the thread that installed the hook" and that
+    // "the hooking application must continue to pump messages" on that
+    // thread; a thread-pool thread has no message loop, so re-installing
+    // the hook there leaves it permanently undeliverable. PostMessageW
+    // queues WM_APP_REHOOK onto this window's message loop (the real pump,
+    // in Program.Main) and returns immediately - cheap and thread-safe -
+    // so the actual Rehook() call happens on WndProc, on the pump thread.
+    public void RequestRehook() => NativeMethods.PostMessageW(_hwnd, WM_APP_REHOOK, IntPtr.Zero, IntPtr.Zero);
 
     public void Create()
     {
@@ -122,6 +142,11 @@ public sealed class TrayIcon : IDisposable
         if (msg == WM_APP_TRAYICON && (int)lParam == NativeMethods.WM_RBUTTONUP)
         {
             ShowContextMenu();
+            return IntPtr.Zero;
+        }
+        if (msg == WM_APP_REHOOK)
+        {
+            _onRehook?.Invoke();
             return IntPtr.Zero;
         }
         if (msg == NativeMethods.WM_COMMAND)

@@ -6,6 +6,11 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="ClipBridge.Win32.Tests" />
+    <!-- Program.cs (Task 20) is the composition root and calls NativeMethods
+         directly for the message loop (GetMessageW/TranslateMessage/
+         DispatchMessageW/PostQuitMessage) and Beep - there is no public
+         wrapper for these, same reasoning as the Tests visibility above. -->
+    <InternalsVisibleTo Include="ClipBridge.App" />
   </ItemGroup>
 
   <PropertyGroup>
