@@ -8,6 +8,12 @@
     <TargetFramework>net10.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- Required by the LibraryImport source generator: SendInput's array
+         parameter marshalling emits pointer-arithmetic code, which the
+         generator wraps in `unsafe` blocks. Without this the build fails
+         with SYSLIB1062 on every LibraryImport in the file, not just
+         SendInput. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
 </Project>
