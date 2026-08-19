@@ -14,11 +14,19 @@
 #>
 [CmdletBinding()]
 param(
-    # FQDN, not the bare name. This value becomes HostName in the generated block, and
-    # HostName is resolved by DNS directly -- it is NOT matched against other Host
-    # aliases in the config. The user's own working block uses the FQDN, and their
-    # verbose ssh trace confirms devsbx01.vollminlab.com is what actually resolves; a
-    # bare name would depend on a DNS search suffix that has not been verified.
+    # Two DIFFERENT names, and conflating them breaks the probe.
+    #
+    # $ProbeHost is what we hand to ssh on the command line to test authentication. It
+    # must be a name the user's EXISTING config has a Host block for, because ssh matches
+    # Host patterns against the name typed on the command line -- not against the resolved
+    # hostname. Probing 'devsbx01.vollminlab.com' falls through to their 'Host *' block,
+    # which sets IdentitiesOnly yes with no IdentityFile, so ssh has nothing to offer and
+    # the probe fails with 'Permission denied (publickey)' on a box that authenticates fine.
+    [string] $ProbeHost = 'devsbx01',
+    #
+    # $TargetHost becomes HostName in the block we generate, and HostName IS resolved by
+    # DNS directly, so it needs the FQDN. The generated block is self-contained (HostName,
+    # User, IdentityFile, IdentitiesOnly), so it does not depend on their other blocks.
     [string] $TargetHost = 'devsbx01.vollminlab.com',
     [string] $TargetUser = 'vollmin',
     [string] $HostAlias  = 'clipbridge',
@@ -159,7 +167,7 @@ function Get-TransportFailureMessage {
         "offers none and the server correctly reports no valid key. Unlock 1Password " +
         "(or start it) so it can serve your key, then re-run this script. If the key " +
         "genuinely is not authorized, confirm the clipbridge public key is present in " +
-        "~/.ssh/authorized_keys on $TargetHost."
+        "your key is present in ~/.ssh/authorized_keys on $TargetHost."
 
     if ($SshOutcome -eq 'PermissionDenied' -and $WslOutcome -eq 'PermissionDenied') {
         return "Both ssh.exe and wsl.exe -e ssh reached $TargetHost and were told " +
@@ -238,19 +246,19 @@ if ($DotSourceOnly) { return }
 
 # --------------------------- main -----------------------------------------
 try {
-    Write-Host "Probing ssh.exe against $TargetHost..." -ForegroundColor Cyan
-    $sshProbe   = Invoke-TransportProbe -Exe 'ssh.exe' -Prefix @() -TargetHost $TargetHost
+    Write-Host "Probing ssh.exe against $ProbeHost..." -ForegroundColor Cyan
+    $sshProbe   = Invoke-TransportProbe -Exe 'ssh.exe' -Prefix @() -TargetHost $ProbeHost
     $sshOutcome = Get-SshProbeOutcome -ExeFound $sshProbe.ExeFound -ExitCode $sshProbe.ExitCode -StdErr $sshProbe.StdErr
 
     if ($sshOutcome -eq 'Authenticated') {
         $wslOutcome = 'NotProbed'
     } else {
         Write-Host "ssh.exe did not authenticate ($sshOutcome); probing wsl.exe -e ssh..." -ForegroundColor Cyan
-        $wslProbe   = Invoke-TransportProbe -Exe 'wsl.exe' -Prefix @('-e', 'ssh') -TargetHost $TargetHost
+        $wslProbe   = Invoke-TransportProbe -Exe 'wsl.exe' -Prefix @('-e', 'ssh') -TargetHost $ProbeHost
         $wslOutcome = Get-SshProbeOutcome -ExeFound $wslProbe.ExeFound -ExitCode $wslProbe.ExitCode -StdErr $wslProbe.StdErr
     }
 
-    $transport = Select-Transport -SshOutcome $sshOutcome -WslOutcome $wslOutcome -TargetHost $TargetHost
+    $transport = Select-Transport -SshOutcome $sshOutcome -WslOutcome $wslOutcome -TargetHost $ProbeHost
     Write-Host "transport: $transport" -ForegroundColor Green
 
     $paths = Get-ClipbridgePaths -SshDir $SshDir -ConfigDir $ConfigDir
