@@ -10,6 +10,13 @@
     <TargetFramework>net10.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishAot>true</PublishAot>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- PublishAot already produces a single native executable; PublishSingleFile
+         is for a non-AOT self-contained publish and the two are mutually
+         exclusive - deliberately not set here. -->
   </PropertyGroup>
 
 </Project>

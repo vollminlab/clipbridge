@@ -125,7 +125,10 @@ jobs:
       - name: AOT publish smoke test
         working-directory: dotnet
         run: |
-          dotnet publish ClipBridge.App/ClipBridge.App.csproj -c Release -r win-x64 --self-contained -p:PublishAot=true
+          # No -r/--self-contained/-p:PublishAot flags: they now live in
+          # ClipBridge.App.csproj (Task 21), so a bare publish is also the check
+          # that the csproj really carries them.
+          dotnet publish ClipBridge.App/ClipBridge.App.csproj -c Release
           $exe = ".\ClipBridge.App\bin\Release\net10.0-windows\win-x64\publish\ClipBridge.App.exe"
 
           # clipbridge is RESIDENT - tray icon plus a message pump - so a correct
@@ -149,3 +152,24 @@ jobs:
           }
           Write-Host "AOT binary still resident after 15s - startup path OK"
           Stop-Process -Id $p.Id -Force
+
+          # --install exits on its own, so it can be run directly. This is the only
+          # automated exercise InstallCommand.ProbeTransport ever gets: it spawns a
+          # real ssh.exe on a real Windows host, which is precisely the shape that
+          # deadlocked when stdout/stderr were drained sequentially. It is EXPECTED
+          # to fail here - the runner cannot reach devsbx01 - so the assertion is
+          # that it fails *gracefully*: a handled non-zero exit with a diagnostic,
+          # never an unhandled exception and never a hang.
+          $out = & $exe --install 2>&1 | Out-String
+          $code = $LASTEXITCODE
+          Write-Host "--install exit=$code"
+          Write-Host $out
+          if ($out -match "Unhandled exception") {
+            Write-Error "--install crashed instead of reporting a transport failure"
+            exit 1
+          }
+          if ($code -ne 0 -and $code -ne 1) {
+            Write-Error "--install exited $code; expected 0 (installed) or 1 (handled probe failure)"
+            exit 1
+          }
+          Write-Host "--install terminated cleanly with a handled exit code"

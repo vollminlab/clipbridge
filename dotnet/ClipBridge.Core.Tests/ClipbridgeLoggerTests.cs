@@ -1,3 +1,4 @@
+using System.Globalization;
 using ClipBridge.Core;
 using Xunit;
 
@@ -5,6 +6,12 @@ namespace ClipBridge.Core.Tests;
 
 public class ClipbridgeLoggerTests : IDisposable
 {
+    // Every stamp below is built with InvariantCulture because ClipbridgeLogger
+    // writes and compares them that way. Before that was pinned, the tests were
+    // culture-sensitive too, so implementation and tests varied together and
+    // agreed by accident - the suite stayed green under any locale while the
+    // on-disk format silently changed. Verified by running under fi-FI, whose
+    // TimeSeparator is '.' rather than ':'.
     private readonly string _dir = Directory.CreateTempSubdirectory("clipbridge-test-").FullName;
     public void Dispose() => Directory.Delete(_dir, recursive: true);
 
@@ -21,8 +28,8 @@ public class ClipbridgeLoggerTests : IDisposable
     public void Drops_lines_older_than_7_days_and_keeps_fresh_ones()
     {
         var logPath = Path.Combine(_dir, "clipbridge.log");
-        var stale = DateTime.UtcNow.AddDays(-10).ToString("yyyy-MM-ddTHH:mm:ss");
-        var fresh = DateTime.UtcNow.AddDays(-1).ToString("yyyy-MM-ddTHH:mm:ss");
+        var stale = DateTime.UtcNow.AddDays(-10).ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture);
+        var fresh = DateTime.UtcNow.AddDays(-1).ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture);
         File.WriteAllLines(logPath, new[] { $"{stale}  old event", $"{fresh}  recent event" });
 
         ClipbridgeLogger.Append(_dir, "new event");
@@ -40,7 +47,7 @@ public class ClipbridgeLoggerTests : IDisposable
         // inclusive: a line exactly 7 days old survives one more write.
         var logPath = Path.Combine(_dir, "clipbridge.log");
         var now = new DateTime(2026, 8, 19, 12, 0, 0);
-        var cutoffStamp = now.AddDays(-7).ToString("yyyy-MM-ddTHH:mm:ss");
+        var cutoffStamp = now.AddDays(-7).ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture);
         File.WriteAllLines(logPath, new[] { $"{cutoffStamp}  exactly at cutoff" });
 
         ClipbridgeLogger.Append(_dir, "new event", now);
@@ -153,7 +160,7 @@ public class ClipbridgeLoggerTests : IDisposable
         // in any other zone, where a regression to DateTime.Now breaks it.
         ClipbridgeLogger.Append(_dir, "event");
         var line = File.ReadAllLines(Path.Combine(_dir, "clipbridge.log")).Last();
-        var stamped = DateTime.ParseExact(line[..19], "yyyy-MM-ddTHH:mm:ss", null);
+        var stamped = DateTime.ParseExact(line[..19], "yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture);
         Assert.True(Math.Abs((stamped - DateTime.UtcNow).TotalMinutes) < 2,
             $"stamp {stamped:O} is not UTC-current; local offset is {TimeZoneInfo.Local.BaseUtcOffset}");
     }
