@@ -8,7 +8,7 @@ keystroke, no `scp`. Full design and rationale: `docs/clipbridge-architecture.md
 ```
 linux/clipbridge-recv           POSIX sh, devsbx01. Validates, stores, prunes. Storage only.
 linux/clipbridge-recv_test.sh   Shell tests — no cluster, no tmux, no network required.
-linux/install.sh                Installs the receiver, prints the authorized_keys line.
+linux/install.sh                Installs the receiver, prints a verify command.
 windows/Send-Clip.ps1           Clipboard extraction + transport. Runs under powershell.exe -STA.
 windows/tests/Send-Clip.Tests.ps1   Pester tests — run on Linux via pwsh, not just in CI.
 windows/clipbridge.ahk          NOT YET BUILT. Hotkey binding + injection. See design doc Task list.

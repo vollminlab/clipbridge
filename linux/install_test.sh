@@ -22,15 +22,15 @@ fail() { echo "  FAIL  $1"; FAILED=$((FAILED + 1)); }
 new_sandbox() { SANDBOX=$(mktemp -d); }
 cleanup_sandbox() { rm -rf "$SANDBOX"; }
 
-# --- a relative destination still prints an absolute authorized_keys line --
+# --- a relative destination still prints an absolute path in the verify line --
 new_sandbox
 mkdir -p "$SANDBOX/relwork"
 out=$(cd "$SANDBOX/relwork" && sh "$INSTALL" "subdir/clipbridge-recv" 2>"$SANDBOX/err")
-line=$(echo "$out" | grep '^restrict,command=')
-path=$(echo "$line" | sed 's/^restrict,command="//; s/".*//')
+line=$(echo "$out" | grep '^  ssh clipbridge ')
+path=$(echo "$line" | awk '{print $3}')
 case "$path" in
-    /*) pass "relative destination arg still prints an absolute command= path" ;;
-    *)  fail "printed command= path is not absolute: '$path'" ;;
+    /*) pass "relative destination arg still prints an absolute path in the verify command" ;;
+    *)  fail "printed verify path is not absolute: '$path'" ;;
 esac
 cleanup_sandbox
 
