@@ -7,22 +7,16 @@
     actually authenticates - the two are not interchangeable on every laptop (measured:
     ssh.exe authenticates while wsl.exe -e ssh returns "Permission denied (publickey)"
     on the same box, because the 1Password SSH agent is wired into Windows OpenSSH but
-    not into WSL's ssh). Writes the clipbridge public key, a `Host clipbridge` block in
-    ~/.ssh/config pinned to that key with IdentitiesOnly, and config.json for
-    Send-Clip.ps1. Safe to run more than once: it does not duplicate the Host block and
-    every other file it writes is fully overwritten with deterministic content.
+    not into WSL's ssh). Writes a `Host clipbridge` block in ~/.ssh/config pointed at the
+    user's existing devsbx01 key with IdentitiesOnly, and config.json for Send-Clip.ps1.
+    Safe to run more than once: it does not duplicate the Host block and every other file
+    it writes is fully overwritten with deterministic content.
 #>
 [CmdletBinding()]
 param(
     [string] $TargetHost = 'devsbx01',
     [string] $TargetUser = 'vollmin',
     [string] $HostAlias  = 'clipbridge',
-
-    # The clipbridge keypair lives in 1Password ("Clipbridge SSH Key", Homelab vault).
-    # This is the public half only - the private half never touches this laptop's disk,
-    # it stays in the 1Password SSH agent. See New-SshConfigBlock below for why the ssh
-    # config still points IdentityFile at this public key even though an agent is in use.
-    [string] $PublicKey = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEJaXXzlVboajGm3+HtmhkHm33ynf3gJPZ9oHZpJTn/u',
 
     # $env:USERPROFILE and $env:LOCALAPPDATA are unset when this is dot-sourced under
     # Pester on Linux for testing; Join-Path throws on a null/empty Path there.
@@ -34,6 +28,11 @@ param(
     [string] $SshDir    = $(if ($env:USERPROFILE) { Join-Path $env:USERPROFILE '.ssh' } else { Join-Path $HOME '.ssh' }),
     [string] $ConfigDir = $(if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'clipbridge' } else { Join-Path $HOME '.clipbridge' }),
 
+    # No dedicated clipbridge key any more - see New-SshConfigBlock below for why. This
+    # points at the public half of the user's existing devsbx01 key, already authorized
+    # for a full shell on that box and already known to the 1Password SSH agent.
+    [string] $IdentityFile = $(Join-Path $SshDir 'devsbx01_id_ed25519.pub'),
+
     [switch] $DotSourceOnly
 )
 
@@ -43,7 +42,6 @@ function Get-ClipbridgePaths {
         [Parameter(Mandatory)][string] $ConfigDir
     )
     return [pscustomobject]@{
-        PubKeyPath     = Join-Path $SshDir 'clipbridge_ed25519.pub'
         SshConfigPath  = Join-Path $SshDir 'config'
         ConfigJsonPath = Join-Path $ConfigDir 'config.json'
     }
@@ -56,21 +54,31 @@ function New-SshConfigBlock {
         [Parameter(Mandatory)][string] $TargetUser,
         [Parameter(Mandatory)][string] $IdentityFile
     )
-    # IdentitiesOnly yes is the security-critical line in this block. The user's real
-    # keys live in the 1Password SSH agent, and an ssh agent offers every identity it
-    # holds to every connection by default. The forced command on the server side
-    # (command="..." in authorized_keys, already in place on devsbx01) only restricts
-    # what the ATTACHED key is allowed to do once it authenticates - it does nothing to
-    # stop ssh from trying a different, unrestricted key first and getting a full shell
-    # instead of the restricted clipbridge-recv command. Without IdentitiesOnly (plus
-    # IdentityFile naming exactly the clipbridge key), the restriction would appear to
-    # be in place - the server-side command= is real - while actually providing none of
-    # the intended protection, because ssh would never be forced to offer that key.
+    # There used to be a dedicated, restricted clipbridge key here, pinned with
+    # IdentitiesOnly so ssh could only ever offer that one shell-less credential. It was
+    # removed: the key lived in the shared 1Password SSH agent, which offers every key it
+    # holds to any client that doesn't pin identities - and mosh runs inside WSL, whose
+    # ssh config has no such pinning (Windows' does). WSL offered the restricted key,
+    # sshd accepted it, and its forced command's implicit no-pty killed mosh - locking
+    # the user out of their own box. The marginal security was near zero anyway: the same
+    # agent already holds a key (this one) that opens a full shell on this exact host, so
+    # a shell-less credential next to it wasn't buying much. clipbridge now authenticates
+    # with that ordinary key and names the remote command explicitly on the ssh command
+    # line (see Send-Clip.ps1's -RemoteCommand) instead of restricting via authorized_keys.
     #
-    # IdentityFile points at the PUBLIC half (clipbridge_ed25519.pub) on purpose: with
-    # an agent in play, ssh only reads the public key on disk to decide which agent
-    # identity to ask for - the private key itself never leaves 1Password and is never
-    # written to this laptop.
+    # IdentitiesOnly yes still matters, for an unrelated reason: the agent holds roughly
+    # two dozen keys, and without pinning, ssh offers them all in agent order - which can
+    # burn the server's auth-attempt limit or authenticate as the wrong identity before
+    # ever trying this one. IdentityFile points at the PUBLIC half on purpose: with an
+    # agent in play, ssh only reads the public key on disk to decide which agent identity
+    # to ask for - the private key itself never leaves 1Password.
+    #
+    # ForwardAgent no: clipbridge never authenticates onward from devsbx01, so there is
+    # nothing for a forwarded agent to do here - it would just be unnecessary exposure of
+    # every key in the agent to that host. (It does not fix any hang: agent forwarding was
+    # tested on, `ssh devsbx01 true` still completed in 0.5s. This is belt-and-suspenders,
+    # not a workaround.) Without this line the user's global `ForwardAgent yes` would
+    # apply here too, since Host blocks don't opt out of global settings on their own.
     return @"
 
 Host $HostAlias
@@ -78,6 +86,7 @@ Host $HostAlias
     User $TargetUser
     IdentityFile $IdentityFile
     IdentitiesOnly yes
+    ForwardAgent no
 "@
 }
 
@@ -242,16 +251,13 @@ try {
     $paths = Get-ClipbridgePaths -SshDir $SshDir -ConfigDir $ConfigDir
     New-Item -ItemType Directory -Path $SshDir -Force | Out-Null
 
-    Set-Content -Path $paths.PubKeyPath -Value $PublicKey -NoNewline -Encoding ASCII
-    Write-Host "wrote $($paths.PubKeyPath)" -ForegroundColor Green
-
     $existingConfig = ''
     if (Test-Path $paths.SshConfigPath) { $existingConfig = Get-Content $paths.SshConfigPath -Raw }
 
     if (Test-SshConfigHasHostBlock -ExistingConfig $existingConfig -HostAlias $HostAlias) {
         Write-Host "ssh config already has a '$HostAlias' Host block - leaving it alone" -ForegroundColor Yellow
     } else {
-        $block = New-SshConfigBlock -HostAlias $HostAlias -TargetHost $TargetHost -TargetUser $TargetUser -IdentityFile $paths.PubKeyPath
+        $block = New-SshConfigBlock -HostAlias $HostAlias -TargetHost $TargetHost -TargetUser $TargetUser -IdentityFile $IdentityFile
         Add-Content -Path $paths.SshConfigPath -Value $block
         Write-Host "added Host $HostAlias to $($paths.SshConfigPath)" -ForegroundColor Green
     }

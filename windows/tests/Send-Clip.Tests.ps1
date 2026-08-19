@@ -49,17 +49,28 @@ Describe 'Get-ClipbridgeConfig' {
 }
 
 Describe 'Get-SshInvocation' {
-    It 'uses ssh.exe with no prefix for the ssh transport' {
+    It 'uses ssh.exe with no prefix for the ssh transport, ending in the remote command' {
         $inv = Get-SshInvocation -Transport 'ssh' -SshHost 'clipbridge'
         $inv.Exe          | Should -Be 'ssh.exe'
         $inv.Arguments[0] | Should -Be 'clipbridge'
+        $inv.Arguments[-1] | Should -Be '/home/vollmin/.local/bin/clipbridge-recv'
+        $inv.Arguments     | Should -HaveCount 2
     }
-    It 'uses wsl.exe with an -e ssh prefix for the wsl transport' {
+    It 'uses wsl.exe with an -e ssh prefix for the wsl transport, ending in the remote command' {
         $inv = Get-SshInvocation -Transport 'wsl' -SshHost 'clipbridge'
         $inv.Exe          | Should -Be 'wsl.exe'
         $inv.Arguments[0] | Should -Be '-e'
         $inv.Arguments[1] | Should -Be 'ssh'
         $inv.Arguments[2] | Should -Be 'clipbridge'
+        $inv.Arguments[-1] | Should -Be '/home/vollmin/.local/bin/clipbridge-recv'
+        $inv.Arguments     | Should -HaveCount 4
+    }
+    It 'honors a custom -RemoteCommand, appended last, for both transports' {
+        $sshInv = Get-SshInvocation -Transport 'ssh' -SshHost 'clipbridge' -RemoteCommand '/opt/custom/clipbridge-recv'
+        $sshInv.Arguments[-1] | Should -Be '/opt/custom/clipbridge-recv'
+
+        $wslInv = Get-SshInvocation -Transport 'wsl' -SshHost 'clipbridge' -RemoteCommand '/opt/custom/clipbridge-recv'
+        $wslInv.Arguments[-1] | Should -Be '/opt/custom/clipbridge-recv'
     }
 }
 

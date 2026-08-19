@@ -331,6 +331,15 @@ because it is unknown here.
 
 ## Security
 
+> **Superseded 2026-08-19.** The dedicated restricted key described below was removed after it
+> locked the user out of `devsbx01` — the 1Password SSH agent offers every key it holds to any
+> client that doesn't pin identities, and `mosh`'s WSL ssh config pins none, so `mosh` was
+> silently handed the shell-less credential and killed by its forced command's implicit
+> `no-pty`. The deployed design instead authenticates with the user's existing `devsbx01` key
+> and names the remote command explicitly on the ssh command line. This section is left as
+> written for the historical record of what was originally planned; treat
+> `docs/clipbridge-architecture.md`'s "Security properties" section as current.
+
 - **No new inbound port** on the laptop or `devsbx01`. The design rides the existing sshd.
 - **A dedicated ed25519 key**, generated into 1Password (Homelab vault, item
   `Clipbridge SSH Key`, tagged `Homelab`), pinned on `devsbx01` as:

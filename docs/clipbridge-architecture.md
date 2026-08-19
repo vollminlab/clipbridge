@@ -157,25 +157,34 @@ precise than the design doc, not a deviation from it.
 
 - **No new inbound port** on either machine. Both directions ride ssh that already exists —
   `sshd` already listens on `devsbx01:22`, and the laptop already authenticates to it.
-- **A dedicated, restricted key.** The `authorized_keys` entry on `devsbx01` reads:
-
-  ```
-  restrict,command="/home/vollmin/.local/bin/clipbridge-recv" ssh-ed25519 AAAA...
-  ```
-
-  `restrict` implies `no-pty`, `no-port-forwarding`, `no-agent-forwarding`, and
-  `no-X11-forwarding`, so they aren't listed separately. `command=` is the load-bearing part:
-  this credential cannot open a shell, no matter what command the client tries to send. A paste
-  hotkey has no business carrying the same authority as an interactive login, and the cost is
-  one `authorized_keys` line.
+- **No dedicated key.** An earlier version of this design generated a dedicated ed25519 key
+  restricted with `restrict,command="/home/vollmin/.local/bin/clipbridge-recv"` in
+  `authorized_keys`, so the credential could never open a shell. It was removed 2026-08-19,
+  because it broke the user's own access to `devsbx01`: the key went into the shared 1Password
+  SSH agent, which offers every key it holds to any client that doesn't pin identities. Windows'
+  ssh config pins identities globally, so `ssh.exe` was unaffected — but `mosh` runs inside WSL,
+  whose ssh config has no such pinning, so WSL offered the restricted key, `sshd` accepted it,
+  and the forced command's implicit `no-pty` killed `mosh`, locking the user out of their own
+  box until the key was pulled from `authorized_keys`. The lesson: a `command=` restriction
+  attaches to a *key*, not a destination, so adding it to a shared agent changes behavior for
+  every client on that machine that doesn't pin identities — and those clients can't be
+  reliably enumerated in advance. The marginal security was also thin to begin with: the same
+  agent already holds a key that opens a full shell on this exact host, so a shell-less
+  credential next to it wasn't buying much. clipbridge now authenticates with the user's
+  ordinary `devsbx01` key and names the remote command explicitly on the ssh command line
+  (`Send-Clip.ps1`'s `-RemoteCommand`, default `/home/vollmin/.local/bin/clipbridge-recv`)
+  instead of restricting via `authorized_keys`. `~/.ssh/config`'s `Host clipbridge` block still
+  sets `IdentitiesOnly yes` — now to keep ssh from working through the agent's ~27 other keys —
+  and `ForwardAgent no`, since clipbridge never authenticates onward from `devsbx01` and a
+  forwarded agent there would be needless exposure.
 - **Storage is locked down and self-healing.** Images are written 0600 into a 0700 directory,
   and `clipbridge-recv` re-applies `chmod 700` on the directory *every run*, unconditionally —
   it doesn't trust a prior run or a stray `chmod -R` to have left the permission alone. The kill
-  switch for this tool is the forced-command entry in `authorized_keys`, not filesystem
-  permissions on its own storage directory. Both bounds — 50 files, 7 days — are enforced on
-  every invocation, because screenshots routinely contain tokens, dashboards, and account data,
-  and a burst of them shouldn't sit around for a week just because the count cap hasn't been
-  hit yet.
+  switch for this tool is the presence of `clipbridge-recv` on `devsbx01` — reinstalling to a
+  no-op or removing it from `~/.local/bin` disables the receiver — not filesystem permissions on
+  its own storage directory. Both bounds — 50 files, 7 days — are enforced on every invocation,
+  because screenshots routinely contain tokens, dashboards, and account data, and a burst of
+  them shouldn't sit around for a week just because the count cap hasn't been hit yet.
 - **The path is typed unquoted.** `SendText` puts the path directly into whatever has focus,
   with no shell and no quoting around it — which is exactly why `Test-RemotePath` in
   `Send-Clip.ps1` is strict: one line, absolute, and only printable ASCII
@@ -186,6 +195,6 @@ precise than the design doc, not a deviation from it.
   `$` as the end anchor, because .NET's `$` also matches immediately before a single trailing
   newline — a path with one trailing `\n` would otherwise pass, and `SendText` types a newline
   as Enter, submitting the prompt before anyone got to type their question after it.
-- **No credential ever touches the repo.** The private key lives in the 1Password SSH agent (or,
-  failing that, `%USERPROFILE%\.ssh\clipbridge_ed25519`); only the public key goes onto
-  `devsbx01`, by hand, at install time.
+- **No credential ever touches the repo.** `devsbx01`'s ssh key already lived on the laptop
+  before clipbridge existed and is managed outside this repo entirely; clipbridge writes no key
+  material anywhere, on either machine.

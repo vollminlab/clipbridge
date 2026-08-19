@@ -47,12 +47,18 @@ function Get-ClipbridgeConfig {
 function Get-SshInvocation {
     param(
         [Parameter(Mandatory)][ValidateSet('ssh', 'wsl')][string] $Transport,
-        [Parameter(Mandatory)][string] $SshHost
+        [Parameter(Mandatory)][string] $SshHost,
+        # No dedicated key + forced command on the server side any more (see
+        # Install-Clipbridge.ps1's New-SshConfigBlock for why), so the remote command has
+        # to be named explicitly here instead of relying on authorized_keys to supply it.
+        # Absolute path: a non-interactive ssh command does not reliably have
+        # ~/.local/bin on PATH even though an interactive login shell does.
+        [string] $RemoteCommand = '/home/vollmin/.local/bin/clipbridge-recv'
     )
     if ($Transport -eq 'wsl') {
-        return [pscustomobject]@{ Exe = 'wsl.exe'; Arguments = @('-e', 'ssh', $SshHost) }
+        return [pscustomobject]@{ Exe = 'wsl.exe'; Arguments = @('-e', 'ssh', $SshHost, $RemoteCommand) }
     }
-    return [pscustomobject]@{ Exe = 'ssh.exe'; Arguments = @($SshHost) }
+    return [pscustomobject]@{ Exe = 'ssh.exe'; Arguments = @($SshHost, $RemoteCommand) }
 }
 
 # The single seam where Windows-only APIs are quarantined. Tests mock this, which
