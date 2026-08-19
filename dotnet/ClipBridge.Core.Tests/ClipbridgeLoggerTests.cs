@@ -49,6 +49,41 @@ public class ClipbridgeLoggerTests : IDisposable
         Assert.Contains("exactly at cutoff", text);
     }
 
+    // Every other test uses a directory that already exists
+    // (Directory.CreateTempSubdirectory), so Directory.CreateDirectory(configDir)
+    // inside Append is never exercised - deleting that line left all logger
+    // tests green. This covers the case where the config directory itself is
+    // missing (e.g. first run before install has created it).
+    [Fact]
+    public void Creates_the_config_directory_if_it_does_not_exist()
+    {
+        var missingDir = Path.Combine(_dir, "does-not-exist-yet");
+        Assert.False(Directory.Exists(missingDir));
+
+        ClipbridgeLogger.Append(missingDir, "first run");
+
+        Assert.True(Directory.Exists(missingDir));
+        var line = File.ReadAllLines(Path.Combine(missingDir, "clipbridge.log")).Last();
+        Assert.Contains("first run", line);
+    }
+
+    // Append writes "{stamp}  {message}" - two spaces. Existing assertions
+    // (a stamp-prefix regex and Contains(message)) are indifferent to
+    // separator width; changing it to one space left all tests green.
+    // v1 was independently verified to use two spaces (bytes 19 and 20 are
+    // both 0x20), so this pins the implementation, not just presence.
+    [Fact]
+    public void Separates_the_stamp_from_the_message_with_exactly_two_spaces()
+    {
+        ClipbridgeLogger.Append(_dir, "ssh exploded");
+        var line = File.ReadAllLines(Path.Combine(_dir, "clipbridge.log")).Last();
+
+        // Stamp format "yyyy-MM-ddTHH:mm:ss" is exactly 19 characters.
+        Assert.Equal(' ', line[19]);
+        Assert.Equal(' ', line[20]);
+        Assert.NotEqual(' ', line[21]);
+    }
+
     [Fact]
     public void Ordinal_stamp_comparison_orders_correctly_across_a_year_rollover()
     {

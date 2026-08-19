@@ -186,7 +186,7 @@ public class DibToPngConverterTests
     // own degenerate-dimensions guard) rather than attempt a huge allocation
     // or hang.
     [Fact]
-    public void Rejects_absurdly_large_declared_dimensions_without_hanging()
+    public async Task Rejects_absurdly_large_declared_dimensions_without_hanging()
     {
         var header = DibFixtures.Header(65535, 65535, 24, 0, 0);
         var dib = header.Concat(new byte[100]).ToArray();
@@ -199,16 +199,28 @@ public class DibToPngConverterTests
         // fallback path is only that it fails fast rather than hanging or
         // silently succeeding with garbage, so this test pins that and
         // nothing more specific.
+        //
+        // DibToPngConverter.Convert has no async/cancellable overload, so the
+        // call still runs on a background thread via Task.Run - but the test
+        // itself awaits the result with a timeout instead of blocking with
+        // .Wait(), keeping the calling thread (and any synchronization
+        // context) free rather than risking a deadlock.
+        var task = Task.Run(() => DibToPngConverter.Convert(dib));
+
         Exception? caught = null;
-        var task = Task.Run(() =>
+        try
         {
-            try { DibToPngConverter.Convert(dib); }
-            catch (Exception ex) { caught = ex; }
-        });
+            await task.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        catch (TimeoutException)
+        {
+            Assert.Fail("DibToPngConverter did not return within 10s for an absurd declared size");
+        }
+        catch (Exception ex)
+        {
+            caught = ex;
+        }
 
-        var completedInTime = task.Wait(TimeSpan.FromSeconds(10));
-
-        Assert.True(completedInTime, "DibToPngConverter did not return within 10s for an absurd declared size");
         Assert.NotNull(caught);
     }
 }

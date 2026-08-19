@@ -38,16 +38,32 @@ public static class ClipbridgeConfigReader
 
         using (doc)
         {
-            var root = doc.RootElement;
-            var transport = root.TryGetProperty("transport", out var t) ? t.GetString() : null;
+            // JsonElement.TryGetProperty/GetString throw InvalidOperationException
+            // (not JsonException) for shape mismatches that aren't syntax errors -
+            // a non-object root, or a field present with the wrong JSON type. Those
+            // are still "this config file is malformed" from the user's point of
+            // view, so they're funneled through the same named exception as the
+            // syntax-error and missing-field cases, always naming the file path.
+            string? transport;
+            string? sshHost;
+            try
+            {
+                var root = doc.RootElement;
+                transport = root.TryGetProperty("transport", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() : null;
+                sshHost = root.TryGetProperty("sshHost", out var h) && h.ValueKind == JsonValueKind.String ? h.GetString() : null;
+            }
+            catch (InvalidOperationException ex)
+            {
+                throw new ClipbridgeConfigException($"clipbridge config at {path} has an unexpected shape - {ex.Message}");
+            }
+
             if (transport is not ("ssh" or "wsl"))
             {
-                throw new ClipbridgeConfigException($"clipbridge config has an unknown transport '{transport}' - expected ssh or wsl");
+                throw new ClipbridgeConfigException($"clipbridge config at {path} has an unknown transport '{transport}' - expected ssh or wsl");
             }
-            var sshHost = root.TryGetProperty("sshHost", out var h) ? h.GetString() : null;
             if (string.IsNullOrWhiteSpace(sshHost))
             {
-                throw new ClipbridgeConfigException("clipbridge config has no sshHost");
+                throw new ClipbridgeConfigException($"clipbridge config at {path} has no sshHost");
             }
             return new ClipbridgeConfig(sshHost, transport);
         }
