@@ -9,6 +9,9 @@ public static class Program
     {
         if (args.Contains("--install"))
         {
+            // No-op when there is no parent console (double-clicked); the install
+            // still runs, its output just has nowhere to go.
+            NativeMethods.AttachConsole(NativeMethods.ATTACH_PARENT_PROCESS);
             return InstallCommand.Run(Console.Out);
         }
 

@@ -59,6 +59,15 @@ internal static partial class NativeMethods
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool Beep(uint dwFreq, uint dwDuration);
 
+    // A WinExe (GUI subsystem) process has no console of its own, so Console.Out
+    // goes nowhere. --install is the one path a human runs from a terminal and
+    // wants to read, so it attaches to the launching shell's console first.
+    public const uint ATTACH_PARENT_PROCESS = 0xFFFFFFFF;
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool AttachConsole(uint dwProcessId);
+
     [LibraryImport("user32.dll")]
     public static partial IntPtr GetForegroundWindow();
 

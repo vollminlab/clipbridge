@@ -160,8 +160,15 @@ jobs:
           # to fail here - the runner cannot reach devsbx01 - so the assertion is
           # that it fails *gracefully*: a handled non-zero exit with a diagnostic,
           # never an unhandled exception and never a hang.
-          $out = & $exe --install 2>&1 | Out-String
-          $code = $LASTEXITCODE
+          # Start-Process -Wait, not `& $exe`: this is a WinExe (GUI subsystem)
+          # binary now, so PowerShell does not block on it and does not capture its
+          # stdout. Invoking it directly would return instantly with no output and
+          # $LASTEXITCODE unset - the assertions below would still "pass" while
+          # testing nothing at all.
+          $ip = Start-Process -FilePath $exe -ArgumentList "--install" -PassThru -Wait `
+                  -RedirectStandardOutput inst-out.txt -RedirectStandardError inst-err.txt
+          $code = $ip.ExitCode
+          $out = (Get-Content inst-out.txt, inst-err.txt -Raw -ErrorAction SilentlyContinue) -join "`n"
           Write-Host "--install exit=$code"
           Write-Host $out
           if ($out -match "Unhandled exception") {
