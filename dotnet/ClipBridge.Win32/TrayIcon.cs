@@ -194,17 +194,31 @@ public sealed class TrayIcon : IDisposable
         }
     }
 
-    // The app's own icon, embedded by <ApplicationIcon>. The apphost stores it as
-    // the first icon resource, so resource id 1 is what LoadIcon wants; falling
-    // back to IDI_APPLICATION means a wrong id costs a generic icon rather than a
-    // failed Shell_NotifyIcon and no tray presence at all.
+    // The app's own icon, embedded by <ApplicationIcon>.
+    //
+    // LoadImage rather than LoadIcon so the tray gets the 16x16 image out of the
+    // icon group at the system's small-icon size, instead of LoadIcon's 32x32
+    // downscaled on the fly - which is visibly softer in the notification area.
+    //
+    // The id is 32512 (RT_GROUP_ICON), not 1: 1..7 are the individual RT_ICON
+    // images and LoadImage wants the group. Verified by parsing the built exe's
+    // resource table, after passing 1 produced exactly the generic-icon fallback
+    // this method exists to avoid.
     private static IntPtr LoadAppIcon()
     {
         var hInstance = NativeMethods.GetModuleHandleW(null);
-        var icon = NativeMethods.LoadIconW(hInstance, (IntPtr)1);
-        return icon != IntPtr.Zero
-            ? icon
-            : NativeMethods.LoadIconW(IntPtr.Zero, NativeMethods.IDI_APPLICATION);
+
+        var small = NativeMethods.LoadImageW(
+            hInstance, NativeMethods.AppIconGroupId, NativeMethods.IMAGE_ICON,
+            NativeMethods.GetSystemMetrics(NativeMethods.SM_CXSMICON),
+            NativeMethods.GetSystemMetrics(NativeMethods.SM_CYSMICON),
+            NativeMethods.LR_DEFAULTCOLOR);
+        if (small != IntPtr.Zero) return small;
+
+        var icon = NativeMethods.LoadIconW(hInstance, NativeMethods.AppIconGroupId);
+        if (icon != IntPtr.Zero) return icon;
+
+        return NativeMethods.LoadIconW(IntPtr.Zero, NativeMethods.IDI_APPLICATION);
     }
 
     private void ShowContextMenu()

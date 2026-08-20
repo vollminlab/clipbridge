@@ -352,6 +352,24 @@ internal static partial class NativeMethods
     [LibraryImport("user32.dll", EntryPoint = "LoadIconW")]
     public static partial IntPtr LoadIconW(IntPtr hInstance, IntPtr lpIconName);
 
+    // LoadIcon/LoadImage take an RT_GROUP_ICON name, not an RT_ICON one. Measured
+    // on the built apphost: RT_ICON ids are 1..7 (one per size in the .ico) while
+    // the single RT_GROUP_ICON is id 32512 - the same numeric value as
+    // IDI_APPLICATION, which is how the apphost makes its icon replace the default.
+    // Passing 1 here silently fails and falls back to the generic system icon.
+    public static readonly IntPtr AppIconGroupId = (IntPtr)32512;
+
+    public const uint IMAGE_ICON = 1;
+    public const uint LR_DEFAULTCOLOR = 0;
+    public const int SM_CXSMICON = 49;
+    public const int SM_CYSMICON = 50;
+
+    [LibraryImport("user32.dll", EntryPoint = "LoadImageW", SetLastError = true)]
+    public static partial IntPtr LoadImageW(IntPtr hInst, IntPtr name, uint type, int cx, int cy, uint fuLoad);
+
+    [LibraryImport("user32.dll")]
+    public static partial int GetSystemMetrics(int nIndex);
+
     // NOTIFYICONDATA contains a ByValTStr string field, which the
     // LibraryImport source generator does not support (SYSLIB1051: "The
     // type 'NOTIFYICONDATA' is not supported by source-generated
