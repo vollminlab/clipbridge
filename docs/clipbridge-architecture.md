@@ -35,6 +35,30 @@ means all four succeeded on a real Windows host.
 Cutover criteria — deleting `windows/` — are Task 24 of the implementation plan, and are
 explicitly gated on day-to-day use rather than on green CI.
 
+### Installing v2 on the laptop
+
+NativeAOT cannot cross-compile, so the binary is only ever produced by the `dotnet-win32` CI
+job. It is uploaded as the `clipbridge-win-x64` artifact on every run — download it from the
+run's Artifacts section on GitHub.
+
+1. **Stop v1 first.** Exit the `clipbridge.ahk` script from the tray. Both versions bind
+   `Ctrl+V`, and with the AHK script loaded both hooks fire on the same keystroke.
+2. **Extract to a stable path**, not `Downloads`. `%LOCALAPPDATA%\clipbridge\bin\` works.
+   On first normal launch the app records *its own current path* in the `Run` key, so moving
+   the exe afterwards leaves a startup entry pointing at nothing.
+3. **`clipbridge.exe --install`** — probes `ssh.exe`, falls back to `wsl.exe -e ssh`, then
+   writes the `Host clipbridge` block into `~/.ssh/config` and `config.json` into
+   `%LOCALAPPDATA%\clipbridge\`. Needs the 1Password agent unlocked and an existing
+   `devsbx01` Host block to probe against. Exits non-zero with a diagnostic if neither
+   transport authenticates — on this laptop's setup that almost always means the agent is
+   locked, not that the key is wrong.
+4. **Check the generated block** in `~/.ssh/config`. `IdentityFile` is written as
+   `~/.ssh/devsbx01_id_ed25519.pub` — the *public* key path, which is how the 1Password agent
+   selects which key to offer. If the real key is named differently, correct it there;
+   `IdentitiesOnly yes` means a wrong path fails the whole connection.
+5. **`clipbridge.exe`** with no arguments — installs the keyboard hook, registers startup, and
+   puts an icon in the tray. It stays resident; there is no window.
+
 ## What this is and why it exists
 
 Screenshots get taken on a Windows laptop. The Claude Code session they're needed in runs on

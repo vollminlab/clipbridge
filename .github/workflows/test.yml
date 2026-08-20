@@ -179,3 +179,16 @@ jobs:
           # in that variable at this point. Without this the step fails on a value
           # the assertions above already inspected and accepted.
           exit 0
+
+      # Without this the binary is built on an ephemeral runner and destroyed with
+      # it - there is no other way to get clipbridge.exe onto the laptop, because
+      # NativeAOT cannot cross-compile from Linux (measured: "Cross-OS native
+      # compilation is not supported"). Uploaded from every run, not just main, so
+      # a PR build can be tested before it merges.
+      - name: Upload clipbridge.exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: clipbridge-win-x64
+          path: dotnet/ClipBridge.App/bin/Release/net10.0-windows/win-x64/publish/
+          if-no-files-found: error
+          retention-days: 90
