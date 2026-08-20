@@ -6,7 +6,12 @@
   </ItemGroup>
 
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <!-- WinExe, not Exe: this app is resident (tray icon + message pump) and never
+         returns. As a console-subsystem binary it opened a console window, blocked
+         the shell that launched it, and closing that window killed clipbridge.
+         WinExe gives no window and returns the prompt immediately; the install
+         command still prints via AttachConsole in Program.Main. -->
+    <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
@@ -14,6 +19,7 @@
     <SelfContained>true</SelfContained>
     <PublishAot>true</PublishAot>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <ApplicationIcon>clipbridge.ico</ApplicationIcon>
     <!-- PublishAot already produces a single native executable; PublishSingleFile
          is for a non-AOT self-contained publish and the two are mutually
          exclusive - deliberately not set here. -->

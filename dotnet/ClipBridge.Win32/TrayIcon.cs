@@ -115,7 +115,7 @@ public sealed class TrayIcon : IDisposable
             uID = (int)NotifyIconId,
             uFlags = NativeMethods.NIF_MESSAGE | NativeMethods.NIF_ICON | NativeMethods.NIF_TIP,
             uCallbackMessage = WM_APP_TRAYICON,
-            hIcon = NativeMethods.LoadIconW(IntPtr.Zero, NativeMethods.IDI_APPLICATION),
+            hIcon = LoadAppIcon(),
             szTip = "clipbridge",
         };
 
@@ -192,6 +192,19 @@ public sealed class TrayIcon : IDisposable
             // itself; swallow rather than crash the process for a menu
             // click on a file that doesn't exist yet.
         }
+    }
+
+    // The app's own icon, embedded by <ApplicationIcon>. The apphost stores it as
+    // the first icon resource, so resource id 1 is what LoadIcon wants; falling
+    // back to IDI_APPLICATION means a wrong id costs a generic icon rather than a
+    // failed Shell_NotifyIcon and no tray presence at all.
+    private static IntPtr LoadAppIcon()
+    {
+        var hInstance = NativeMethods.GetModuleHandleW(null);
+        var icon = NativeMethods.LoadIconW(hInstance, (IntPtr)1);
+        return icon != IntPtr.Zero
+            ? icon
+            : NativeMethods.LoadIconW(IntPtr.Zero, NativeMethods.IDI_APPLICATION);
     }
 
     private void ShowContextMenu()
