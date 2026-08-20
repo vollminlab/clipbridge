@@ -74,6 +74,8 @@ public static class InstallCommand
         File.WriteAllText(paths.ConfigJsonPath, ClipbridgeConfigWriter.ToJson(cfg));
         output.WriteLine($"wrote {paths.ConfigJsonPath}");
 
+        CreateStartMenuShortcut(output);
+
         return 0;
     }
 
@@ -86,6 +88,83 @@ public static class InstallCommand
     // not just the TCP handshake, while still being short enough that the
     // installer never looks hung to a human watching it.
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(15);
+
+    // Shelled out to PowerShell rather than done in-process, because NativeAOT
+    // has no built-in COM support and creating a .lnk means IShellLink. One
+    // process spawn at install time is a better trade than hand-rolling the
+    // shortcut binary format or wiring up ComWrappers for a single call.
+    //
+    // Per-user Start Menu, so this needs no elevation. Non-fatal: a missing
+    // shortcut is cosmetic, and the install itself has already succeeded by the
+    // time this runs.
+    private static void CreateStartMenuShortcut(TextWriter output)
+    {
+        try
+        {
+            var exePath = Environment.ProcessPath;
+            if (string.IsNullOrEmpty(exePath))
+            {
+                output.WriteLine("skipped Start Menu shortcut - could not determine own path");
+                return;
+            }
+
+            var startMenu = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "Microsoft", "Windows", "Start Menu", "Programs");
+            Directory.CreateDirectory(startMenu);
+            var lnk = Path.Combine(startMenu, "clipbridge.lnk");
+
+            var script =
+                "$s = (New-Object -ComObject WScript.Shell).CreateShortcut('" + lnk.Replace("'", "''") + "'); " +
+                "$s.TargetPath = '" + exePath.Replace("'", "''") + "'; " +
+                "$s.WorkingDirectory = '" + (Path.GetDirectoryName(exePath) ?? "").Replace("'", "''") + "'; " +
+                "$s.IconLocation = '" + exePath.Replace("'", "''") + ",0'; " +
+                "$s.Description = 'clipbridge - paste a screenshot into a remote Claude Code prompt'; " +
+                "$s.Save()";
+
+            var psi = new ProcessStartInfo("powershell.exe")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            psi.ArgumentList.Add("-NoProfile");
+            psi.ArgumentList.Add("-NonInteractive");
+            psi.ArgumentList.Add("-Command");
+            psi.ArgumentList.Add(script);
+
+            using var process = Process.Start(psi);
+            if (process is null)
+            {
+                output.WriteLine("skipped Start Menu shortcut - could not start powershell.exe");
+                return;
+            }
+            var stdErrTask = process.StandardError.ReadToEndAsync();
+            var stdOutTask = process.StandardOutput.ReadToEndAsync();
+            if (!process.WaitForExit(15000))
+            {
+                try { process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
+                output.WriteLine("skipped Start Menu shortcut - powershell.exe timed out");
+                return;
+            }
+            stdOutTask.GetAwaiter().GetResult();
+            var stdErr = stdErrTask.GetAwaiter().GetResult();
+
+            if (process.ExitCode == 0 && File.Exists(lnk))
+            {
+                output.WriteLine($"created Start Menu shortcut {lnk}");
+            }
+            else
+            {
+                output.WriteLine($"could not create Start Menu shortcut (exit {process.ExitCode}) {stdErr.Trim()}");
+            }
+        }
+        catch (Exception ex)
+        {
+            output.WriteLine($"could not create Start Menu shortcut - {ex.Message}");
+        }
+    }
 
     private static (bool ExeFound, int ExitCode, string StdErr) ProbeTransport(string exe, string[] prefix, string targetHost)
     {

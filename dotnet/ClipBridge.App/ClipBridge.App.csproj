@@ -19,6 +19,7 @@
     <SelfContained>true</SelfContained>
     <PublishAot>true</PublishAot>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <ApplicationIcon>clipbridge.ico</ApplicationIcon>
     <!-- PublishAot already produces a single native executable; PublishSingleFile
          is for a non-AOT self-contained publish and the two are mutually
          exclusive - deliberately not set here. -->
