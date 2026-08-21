@@ -1,24 +1,25 @@
 # clipbridge — architecture
 
-**Date:** 2026-08-19
-**Status:** v1 is built, merged and in day-to-day use. v2 (`dotnet/`) is merged and verified on
-`windows-latest` CI, but has **not** yet been exercised on the laptop, so v1 remains the
-installed tool. See "v2 status" below.
+**Date:** 2026-08-21
+**Status:** v2 is the tool. v1 (`windows/`, PowerShell + AutoHotkey) was deleted on 2026-08-21
+after v2 was verified in day-to-day use.
 
-## v2 status
+## The Windows client
 
-`clipbridge.exe` (`dotnet/`, `win-x64`, `PublishAot`) replaces `Send-Clip.ps1` +
-`Install-Clipbridge.ps1` + `clipbridge.ahk` with one resident process, cutting the per-paste
-cost from ~3.0s (almost entirely `powershell.exe` startup, per keypress) to the ssh round trip
-alone. Rationale and architecture: `docs/superpowers/specs/clipbridge-csharp-design.md`;
+`clipbridge.exe` (`dotnet/`, `win-x64`, `PublishAot`) is one resident process holding a
+low-level keyboard hook, a tray icon and a worker thread. It replaced three components in two
+languages — `Send-Clip.ps1`, `Install-Clipbridge.ps1` and `clipbridge.ahk` — cutting the
+per-paste cost from ~3.0s (almost entirely `powershell.exe` startup, paid on every keypress) to
+the ssh round trip alone. Rationale: `docs/superpowers/specs/clipbridge-csharp-design.md`;
 task-by-task build: `docs/superpowers/plans/clipbridge-csharp-implementation.md`.
 
-`clipbridge-recv` is **unchanged**. The wire protocol — PNG on stdin, one absolute path on
-stdout — never depended on what was sending it, which is why the rewrite touched neither the
-receiver nor the Linux side at all.
+`clipbridge-recv` was **never touched by the rewrite**. The wire protocol — PNG on stdin, one
+absolute path on stdout — never depended on what was sending it, so the entire Linux side came
+through the language change unchanged.
 
-**v1 stays installed until v2 is proven in real use.** They coexist safely: v1 only acts while
-its AutoHotkey script is loaded. What CI proves and what it does not:
+Most of the logic lives in `ClipBridge.Core`, which references no Windows API and is therefore
+tested on Linux for real. `ClipBridge.Win32` holds thin P/Invoke shims that only execute on
+Windows. What CI proves and what it does not:
 
 | Proven on `windows-latest` | Only provable on the laptop |
 |---|---|
@@ -32,8 +33,10 @@ The startup assertion is stronger than it looks: `RegisterClassW`, `CreateWindow
 `SetWindowsHookExW` and `Shell_NotifyIconW` each throw on failure, so "still resident after 15s"
 means all four succeeded on a real Windows host.
 
-Cutover criteria — deleting `windows/` — are Task 24 of the implementation plan, and are
-explicitly gated on day-to-day use rather than on green CI.
+The cutover was gated on that right-hand column, not on green CI. It happened on 2026-08-21
+after v2 pasted a screenshot end to end, passed a text-paste and a browser `Ctrl+Shift+V` check,
+failed cleanly with the network down, and survived 31 minutes of uptime — the last one being the
+watchdog re-hook, whose failure mode is "worked for a while, then quietly stopped".
 
 ### Installing v2 on the laptop
 
@@ -41,22 +44,20 @@ NativeAOT cannot cross-compile, so the binary is only ever produced by the `dotn
 job. It is uploaded as the `clipbridge-win-x64` artifact on every run — download it from the
 run's Artifacts section on GitHub.
 
-1. **Stop v1 first.** Exit the `clipbridge.ahk` script from the tray. Both versions bind
-   `Ctrl+V`, and with the AHK script loaded both hooks fire on the same keystroke.
-2. **Extract to a stable path**, not `Downloads`. `%LOCALAPPDATA%\clipbridge\bin\` works.
+1. **Extract to a stable path**, not `Downloads`. `%LOCALAPPDATA%\clipbridge\bin\` works.
    On first normal launch the app records *its own current path* in the `Run` key, so moving
    the exe afterwards leaves a startup entry pointing at nothing.
-3. **`clipbridge.exe --install`** — probes `ssh.exe`, falls back to `wsl.exe -e ssh`, then
+2. **`clipbridge.exe --install`** — probes `ssh.exe`, falls back to `wsl.exe -e ssh`, then
    writes the `Host clipbridge` block into `~/.ssh/config` and `config.json` into
    `%LOCALAPPDATA%\clipbridge\`. Needs the 1Password agent unlocked and an existing
    `devsbx01` Host block to probe against. Exits non-zero with a diagnostic if neither
    transport authenticates — on this laptop's setup that almost always means the agent is
    locked, not that the key is wrong.
-4. **Check the generated block** in `~/.ssh/config`. `IdentityFile` is written as
+3. **Check the generated block** in `~/.ssh/config`. `IdentityFile` is written as
    `~/.ssh/devsbx01_id_ed25519.pub` — the *public* key path, which is how the 1Password agent
    selects which key to offer. If the real key is named differently, correct it there;
    `IdentitiesOnly yes` means a wrong path fails the whole connection.
-5. **`clipbridge.exe`** with no arguments — installs the keyboard hook, registers startup, and
+4. **`clipbridge.exe`** with no arguments — installs the keyboard hook, registers startup, and
    puts an icon in the tray. It stays resident; there is no window.
 
 ## What this is and why it exists
@@ -68,31 +69,34 @@ screenshots mostly just didn't get shared. clipbridge closes that gap: one keyst
 laptop, and the screenshot's path lands in the prompt of whichever Claude Code session is
 currently on screen.
 
-## The three components
+## The two components
 
 Each owns exactly one concern. Nothing does two jobs.
 
-| Component | Runs on | Owns | Status |
-|---|---|---|---|
-| `clipbridge-recv` | `devsbx01` | Validate, store, prune. Storage only. | Implemented |
-| `Send-Clip.ps1` | Windows laptop | Clipboard extraction, transport to `devsbx01`. | Implemented |
-| `clipbridge.ahk` | Windows laptop | Hotkey binding, invoking the grabber, pasting the result into the focused window. | Implemented (superseded by v2 once proven) |
+| Component | Runs on | Owns |
+|---|---|---|
+| `clipbridge-recv` | `devsbx01` | Validate, store, prune. Storage only. |
+| `clipbridge.exe` | Windows laptop | Hotkey, clipboard extraction, transport, pasting the result. |
 
 `clipbridge-recv` (POSIX `sh`, `~/.local/bin/clipbridge-recv` on `devsbx01`) reads a PNG on
 stdin, writes it to `~/.clipbridge/<timestamp>.png`, prunes old files, and prints the absolute
 path on stdout. It has no idea which Claude Code session anything is going to, and doesn't need
 to — targeting isn't its problem.
 
-`Send-Clip.ps1` (Windows PowerShell 5.1, `-STA`) pulls the image off the clipboard, prefers the
-lossless `PNG` clipboard format over the DIB fallback, streams the bytes to `devsbx01` over
-`ssh.exe`, and writes the single returned path to `%LOCALAPPDATA%\clipbridge\last-path.txt`.
+`clipbridge.exe` scopes `Ctrl+V` to the terminal, pulls the image off the clipboard (preferring
+the lossless `PNG` clipboard format over the DIB fallback), streams the bytes to `devsbx01` over
+`ssh.exe`, and **pastes** the returned path into whatever has focus.
 
-`clipbridge.ahk` is where `Ctrl+V` gets scoped to the terminal window, `Send-Clip.ps1` gets
-run hidden, and the returned path gets **pasted** into whatever has focus. Pasted, not typed:
-Claude Code scans *pasted* text for image paths that exist on the local filesystem and attaches
-the image, and text arriving as keystrokes is never scanned. Measured 2026-08-19 — three
-`SendText` attempts placed a correct path in the prompt and attached nothing; the identical
-path pasted attached instantly.
+Pasted, not typed. Claude Code scans *pasted* text for image paths that exist on the local
+filesystem and attaches the image; text arriving as keystrokes is never scanned. Measured
+2026-08-19 — three `SendText` attempts placed a correct path in the prompt and attached nothing;
+the identical path pasted attached instantly.
+
+The paste is synthesized because the hotkey was **swallowed**: the keyboard hook returns 1 for a
+`Ctrl+V` it intends to handle, so the original keystroke never reaches the terminal. From that
+moment the process owes the user a paste, and every path through the orchestrator — including
+every failure — ends in exactly one `SendInput`. On a failure the clipboard is deliberately left
+untouched, so what gets pasted is whatever the user already had.
 
 ## Data flow
 
@@ -101,19 +105,26 @@ Screenshot lands on the Windows clipboard
         │
 Click into the terminal with the target Claude Code session, press Ctrl+V
         │
-clipbridge.ahk runs Send-Clip.ps1 hidden, waits for it to exit
+The low-level keyboard hook sees Ctrl+V, confirms the foreground process is a
+configured terminal and that an image is on the clipboard, and SWALLOWS the key
         │
-Send-Clip.ps1 extracts a PNG to %TEMP%, streams it over ssh.exe to devsbx01
+The hook posts to a worker thread and returns immediately - it must, or Windows
+silently unhooks a callback that overruns LowLevelHooksTimeout
+        │
+Worker: extract PNG to %TEMP%, stream it over ssh.exe to devsbx01
         │
 clipbridge-recv validates the PNG magic, writes ~/.clipbridge/<ts>.png, prunes, prints the path
         │
-Send-Clip.ps1 writes that path to last-path.txt, exits 0
-        │
-clipbridge.ahk reads last-path.txt, SendText's the path + a trailing space into the focused window
+Worker: capture the clipboard, put the path on it as text, synthesize Ctrl+V,
+wait ~200ms for the target to consume it, restore the original clipboard
         │
 Claude Code scans the pasted text, finds a path that exists on the local filesystem,
 attaches the image, strips the path from the message
 ```
+
+That ~200ms wait is not padding. `SendInput` only queues input, so restoring the clipboard
+immediately would put the user's original contents back before the target had read the path —
+and the target would paste the wrong thing, intermittently.
 
 The last step is what makes the whole design work, and it wasn't assumed — it was observed.
 `paste-cache` recorded the pasted text at `04:04:34.675` with the Linux path stripped mid-line,
@@ -173,8 +184,7 @@ run either, because it's known once installed.
 
 ## Exit codes
 
-Get these from the code, not the design doc — the implementation added more granularity than
-the original spec table.
+Get these from the code, not the design doc.
 
 ### `clipbridge-recv` (`linux/clipbridge-recv`)
 
@@ -184,30 +194,28 @@ the original spec table.
 | `3` | Bad input — empty stdin, or the first 8 bytes aren't the PNG magic (`89 50 4E 47 0D 0A 1A 0A`) |
 | `5` | Cannot write — `mkdir -p ~/.clipbridge` failed, `chmod 700` failed, the directory isn't writable, `mktemp` failed, the `cat > $tmp` write failed, or the final `chmod 600` / `mv` into place failed |
 
-### `Send-Clip.ps1` (`windows/Send-Clip.ps1`)
+### `clipbridge.exe`
 
-| Exit | Condition |
-|---|---|
-| `0` | Path written to `last-path.txt` |
-| `2` | No image on the clipboard — not treated as an error, nothing is logged |
-| `3` | ssh exited 3 — the receiver rejected the input (propagated verbatim) |
-| `4` | ssh exited with anything other than 0, 3, or 5 (transport/auth failure), or an unhandled exception anywhere in the script |
-| `5` | ssh exited 5 — the receiver couldn't write its storage directory (propagated verbatim) |
-| `6` | ssh exited 0 but stdout wasn't exactly one non-blank, well-formed absolute path |
-| `7` | Local failure extracting/writing the clipboard PNG to `%TEMP%`, before ssh was ever invoked |
-| `8` | Configuration problem — `config.json` missing, malformed JSON, unknown `transport`, or blank `sshHost`, before ssh was ever invoked |
+v2 has no exit-code taxonomy, because there is no longer a process boundary to carry one. v1
+needed exits `2`-`8` so `clipbridge.ahk` could tell a receiver rejection from a transport
+failure from a config problem; in one process that is a return value and a log line.
 
-Exit codes `3` and `5` are the receiver's own codes, checked explicitly and passed straight
-through rather than folded into the generic `4`. That distinction exists so a failure on the
-remote side is never misreported as a transport failure — the two are diagnosed by looking in
-completely different places (the receiver's stderr relayed into `clipbridge.log` vs. `ssh`
-connectivity). Exit codes `7` and `8` don't appear in the original design spec at all: local
-clipboard/temp-file trouble and configuration trouble both used to fall into the same "ssh
-failed" bucket as a genuine transport failure. Splitting them out means the very first run
-before `Install-Clipbridge.ps1` has ever executed logs "configuration problem: clipbridge config
-not found" instead of "ssh exit 4" — which would have sent debugging toward the network instead
-of toward the missing install step. This is a real place where the implementation is more
-precise than the design doc, not a deviation from it.
+What replaced it:
+
+| Outcome | User sees | Log |
+|---|---|---|
+| Pasted | the path in the prompt, 900Hz beep | nothing |
+| No image on the clipboard | ordinary paste, 600/400Hz two-tone | nothing - not an error |
+| Failed | ordinary paste, 300Hz beep | one line naming the cause |
+
+The receiver's own exits `3` and `5` are still read and named distinctly in the log rather than
+folded into a generic transport failure, for the reason the taxonomy existed in the first place:
+a failure on the remote side and a failure reaching it are diagnosed by looking in completely
+different places. `clipbridge.log` lives beside `config.json` in `%LOCALAPPDATA%\clipbridge\`,
+is capped at 7 days, and is stamped in UTC with a trailing `Z`.
+
+Every one of those outcomes ends in exactly one synthesized paste. That is the invariant the
+whole tool rests on - see "The two components" above.
 
 ## Security properties
 
@@ -228,7 +236,7 @@ precise than the design doc, not a deviation from it.
   agent already holds a key that opens a full shell on this exact host, so a shell-less
   credential next to it wasn't buying much. clipbridge now authenticates with the user's
   ordinary `devsbx01` key and names the remote command explicitly on the ssh command line
-  (`Send-Clip.ps1`'s `-RemoteCommand`, default `/home/vollmin/.local/bin/clipbridge-recv`)
+  (`SshArgumentBuilder.DefaultRemoteCommand`, `/home/vollmin/.local/bin/clipbridge-recv`)
   instead of restricting via `authorized_keys`. `~/.ssh/config`'s `Host clipbridge` block still
   sets `IdentitiesOnly yes` — now to keep ssh from working through the agent's ~27 other keys —
   and `ForwardAgent no`, since clipbridge never authenticates onward from `devsbx01` and a
@@ -241,16 +249,13 @@ precise than the design doc, not a deviation from it.
   its own storage directory. Both bounds — 50 files, 7 days — are enforced on every invocation,
   because screenshots routinely contain tokens, dashboards, and account data, and a burst of
   them shouldn't sit around for a week just because the count cap hasn't been hit yet.
-- **The path is typed unquoted.** `SendText` puts the path directly into whatever has focus,
-  with no shell and no quoting around it — which is exactly why `Test-RemotePath` in
-  `Send-Clip.ps1` is strict: one line, absolute, and only printable ASCII
-  (`^/[\x21-\x7E]+\z`). That excludes space, so a filename never needs quoting to type safely;
-  it excludes non-ASCII, because `last-path.txt` is written with `-Encoding ASCII`, which
-  doesn't throw on a non-ASCII byte — it silently substitutes `?`, which would corrupt the path
-  with no error and no log line if the check didn't catch it first; and it uses `\z` rather than
-  `$` as the end anchor, because .NET's `$` also matches immediately before a single trailing
-  newline — a path with one trailing `\n` would otherwise pass, and `SendText` types a newline
-  as Enter, submitting the prompt before anyone got to type their question after it.
+- **The path is pasted unquoted.** It goes straight into whatever has focus, with no shell and
+  no quoting around it — which is exactly why `PathValidator` is strict: one line, absolute, and
+  only printable ASCII (`^/[\x21-\x7E]+\z`). That excludes space, so a filename never needs
+  quoting; it excludes control characters and non-ASCII; and it uses `\z` rather than `$` as the
+  end anchor, because .NET's `$` also matches immediately before a single trailing newline. A
+  path with one trailing `\n` would otherwise pass — and a newline reaching the prompt is Enter,
+  submitting the message before the user has written their question.
 - **No credential ever touches the repo.** `devsbx01`'s ssh key already lived on the laptop
   before clipbridge existed and is managed outside this repo entirely; clipbridge writes no key
   material anywhere, on either machine.

@@ -42,41 +42,6 @@ jobs:
       - name: busybox ash - install_test.sh
         run: busybox ash linux/install_test.sh
 
-  pester:
-    name: pester (windows)
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      # Production runs powershell.exe -STA (Windows PowerShell 5.1). Testing
-      # so far has only ever exercised pwsh (7) on Linux. Run the suite under
-      # BOTH runtimes here so a 5.1-only regression (e.g. the $IsWindows gap
-      # already hit once) can't slip through unnoticed.
-      - name: Pester on pwsh (PowerShell 7)
-        shell: pwsh
-        run: |
-          Install-Module Pester -Force -SkipPublisherCheck -MinimumVersion 5.5.0
-          Import-Module Pester -MinimumVersion 5.5.0
-          $result = Invoke-Pester -Path windows/tests -PassThru
-          "Total={0} Passed={1} Failed={2} Skipped={3}" -f $result.TotalCount, $result.PassedCount, $result.FailedCount, $result.SkippedCount
-          if ($result.FailedCount -gt 0 -or $result.SkippedCount -gt 0) {
-            Write-Error "pwsh run: $($result.FailedCount) failed, $($result.SkippedCount) skipped (want 0 and 0)"
-            exit 1
-          }
-
-      - name: Pester on powershell (Windows PowerShell 5.1)
-        shell: powershell
-        run: |
-          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-          Install-Module Pester -Force -SkipPublisherCheck -MinimumVersion 5.5.0
-          Import-Module Pester -MinimumVersion 5.5.0
-          $result = Invoke-Pester -Path windows/tests -PassThru
-          "Total={0} Passed={1} Failed={2} Skipped={3}" -f $result.TotalCount, $result.PassedCount, $result.FailedCount, $result.SkippedCount
-          if ($result.FailedCount -gt 0 -or $result.SkippedCount -gt 0) {
-            Write-Error "powershell 5.1 run: $($result.FailedCount) failed, $($result.SkippedCount) skipped (want 0 and 0)"
-            exit 1
-          }
-
   dotnet-core:
     name: dotnet-core (linux)
     runs-on: ubuntu-latest
