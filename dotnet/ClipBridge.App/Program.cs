@@ -51,7 +51,7 @@ public static class Program
         using var tray = new TrayIcon(
             Path.Combine(configDir, "clipbridge.log"),
             onExit: () => NativeMethods.PostQuitMessage(0),
-            onReinstall: () => workerThread.Post(() => InstallCommand.Run(TextWriter.Null)),
+            onReinstall: () => workerThread.Post(() => InstallCommand.Run(new LogWriter(configDir))),
             // Runs on WndProc (the message-pump thread) via WM_APP_REHOOK -
             // see the watchdog Timer below for why this indirection exists
             // and TrayIcon.RequestRehook for the mechanism.
@@ -127,6 +127,24 @@ public static class Program
             case PasteOutcome.Failed:
                 NativeMethods.Beep(300, 200);
                 break;
+        }
+    }
+
+    // Reinstall from the tray used to write to TextWriter.Null, so it ran
+    // correctly and reported absolutely nothing - indistinguishable from a menu
+    // item that does not work. There is no console to print to (WinExe) and a
+    // dialog would need a UI this design deliberately does not have, so its
+    // progress goes where every other diagnostic already goes: the log.
+    private sealed class LogWriter(string configDir) : TextWriter
+    {
+        public override System.Text.Encoding Encoding => System.Text.Encoding.UTF8;
+
+        public override void WriteLine(string? value)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                ClipbridgeLogger.Append(configDir, $"reinstall: {value}");
+            }
         }
     }
 
