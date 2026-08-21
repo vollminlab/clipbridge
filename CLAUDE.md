@@ -9,25 +9,16 @@ keystroke, no `scp`. Full design and rationale: `docs/clipbridge-architecture.md
 linux/clipbridge-recv           POSIX sh, devsbx01. Validates, stores, prunes. Storage only.
 linux/clipbridge-recv_test.sh   Shell tests — no cluster, no tmux, no network required.
 linux/install.sh                Installs the receiver, prints a verify command.
-windows/Send-Clip.ps1           Clipboard extraction + transport. Runs under powershell.exe -STA.
-windows/tests/Send-Clip.Tests.ps1   Pester tests — run on Linux via pwsh, not just in CI.
-windows/clipbridge.ahk          NOT YET BUILT. Hotkey binding + injection. See design doc Task list.
 verify/                         One-off measurement probes behind the design doc's Verified findings.
 docs/clipbridge-architecture.md Architecture record.
 docs/superpowers/specs/         Design spec.
 docs/superpowers/plans/         Implementation plan (task-by-task).
 
-dotnet/                         C# AOT rewrite (v2). Merged, CI-verified, not yet laptop-proven.
+dotnet/                         clipbridge.exe - the Windows client. Replaced windows/ on 2026-08-21.
 dotnet/ClipBridge.Core/         Every decision. Zero Windows APIs, so it tests on Linux for real.
 dotnet/ClipBridge.Win32/        Thin P/Invoke shims. Only genuinely exercised on windows-latest.
 dotnet/ClipBridge.App/          Composition root, message loop, tray, --install, AOT publish target.
 ```
-
-`clipbridge.ahk` holds no clipboard, file, or network logic, and that's deliberate, not an
-oversight to fix later. AHK cannot be exercised in CI — there's no way to assert on what it did.
-So all logic that can be wrong lives in `clipbridge-recv` and `Send-Clip.ps1`, where it's
-testable, and the AHK script's only job is `RunWait`, read a file, `SendText`. Don't move logic
-into the AHK script to "simplify" the Windows side — that moves it out of test coverage.
 
 ## Testing
 
@@ -39,17 +30,7 @@ busybox ash linux/clipbridge-recv_test.sh
 shellcheck -s sh linux/clipbridge-recv linux/clipbridge-recv_test.sh linux/install.sh
 ```
 
-**PowerShell tests run on Linux**, via `pwsh` (Pester 6, confirmed to accept Pester 5 syntax —
-`BeforeAll`, `Should -Be`, `Should -Throw -ExpectedMessage`, `Mock` — unchanged):
-
-```bash
-pwsh -NoProfile -Command "Invoke-Pester ./windows/tests/Send-Clip.Tests.ps1 -Output Detailed"
-```
-
-No waiting on CI for the PowerShell half — develop it test-first on Linux exactly like the
-shell half.
-
-## Testing (dotnet/, v2)
+## Testing (dotnet/)
 
 **Core runs on Linux, for real** — 143 tests, no Windows needed:
 
@@ -81,11 +62,17 @@ linker. CI does the AOT publish.
 
 ## The one rule that makes this safe to leave installed
 
-**No failure path may leave `Ctrl+V` dead.** Every error in `clipbridge.ahk` falls through to
-an ordinary paste — a paste key that silently does nothing when the far side is unreachable is
-worse than no tool at all. If you're touching the AHK script, every new failure branch needs
-its own beep/log and still has to end in `Send("^v")`. This is not a style preference; it's the
-property the whole tool depends on to be trustworthy enough to bind over the real paste key.
+**No failure path may leave `Ctrl+V` dead.** The keyboard hook *swallows* the keystroke before
+handing off to the worker, so from that moment the process owes the user a paste. Every path
+through `PasteOrchestrator.Handle` ends in exactly one `IPasteSink.SendPaste()` - never zero,
+never twice - including paths that throw unexpectedly, and including a logger that itself
+throws. A paste key that silently does nothing when the far side is unreachable is worse than
+no tool at all.
+
+This is not a style preference; it is the property the whole tool depends on to be trustworthy
+enough to bind over the real paste key. It has a dedicated regression suite
+(`PasteOrchestratorInvariantProbeTests`) that injects a throw at each collaborator and asserts
+the paste still happens. Removing the catch-all backstop fails exactly four of them.
 
 ## Never commit a `.png`
 
@@ -104,6 +91,10 @@ checks the 8-byte magic.
 
 Traps that cost real time building this. None of them are discoverable from reading the code
 cold — write them down here or they get rediscovered the hard way.
+
+> **Gotchas 1-5 describe `windows/`, the PowerShell + AutoHotkey v1, deleted 2026-08-21.** They
+> are kept because the traps generalise and because #5 is the direct precedent for how the
+> dotnet Win32 tests skip. The code they refer to is gone; the lessons are not.
 
 **1. `System.Windows.Forms` does not exist on Linux.** Any Windows-only API referenced at file
 scope makes `Send-Clip.ps1` fail to dot-source, which kills every test in the file before any of
