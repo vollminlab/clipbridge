@@ -58,7 +58,27 @@ run's Artifacts section on GitHub.
    selects which key to offer. If the real key is named differently, correct it there;
    `IdentitiesOnly yes` means a wrong path fails the whole connection.
 4. **`clipbridge.exe`** with no arguments — installs the keyboard hook, registers startup, and
-   puts an icon in the tray. It stays resident; there is no window.
+   puts an icon in the tray. It stays resident; there is no window. Every launch also rewrites
+   its **Settings > Apps** entry (`HKCU\...\Uninstall\clipbridge`), so it appears in
+   Add/Remove Programs like an installed app, and a moved exe heals both entries on next launch.
+
+### Uninstalling
+
+Uninstall from **Settings > Apps** (or `appwiz.cpl`), or run `clipbridge.exe --uninstall`.
+Either way it asks a running instance to exit through the tray's own Exit path (so `Ctrl+V`
+is unhooked cleanly), removes the `Run` value and the Apps entry, the Start Menu shortcut,
+the `Host clipbridge` block in `~/.ssh/config` (backed up to
+`config.clipbridge-uninstall.bak` first), and `%LOCALAPPDATA%\clipbridge\`. The exe and its
+`.pdb` are deleted by a detached `cmd.exe` once the process exits; the folder is removed only
+if that leaves it empty. `--quiet` suppresses the result dialog shown when there is no console.
+
+It does not touch `devsbx01`: `clipbridge-recv` and its image store belong to
+`linux/install.sh`.
+
+**Why there is no MSI.** clipbridge is one per-user exe that never elevates, so an installer
+would only add a WiX toolchain to CI while fixing none of the two real rough edges: SmartScreen
+still warns (that needs a paid OV/EV certificate, not an installer), and the binary still only
+comes from CI. The Apps entry and `--uninstall` give the discoverability an installer would.
 
 ## What this is and why it exists
 

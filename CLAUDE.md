@@ -17,7 +17,7 @@ docs/superpowers/plans/         Implementation plan (task-by-task).
 dotnet/                         clipbridge.exe - the Windows client. Replaced windows/ on 2026-08-21.
 dotnet/ClipBridge.Core/         Every decision. Zero Windows APIs, so it tests on Linux for real.
 dotnet/ClipBridge.Win32/        Thin P/Invoke shims. Only genuinely exercised on windows-latest.
-dotnet/ClipBridge.App/          Composition root, message loop, tray, --install, AOT publish target.
+dotnet/ClipBridge.App/          Composition root, message loop, tray, --install/--uninstall, AOT publish target.
 ```
 
 ## Testing
@@ -32,7 +32,7 @@ shellcheck -s sh linux/clipbridge-recv linux/clipbridge-recv_test.sh linux/insta
 
 ## Testing (dotnet/)
 
-**Core runs on Linux, for real** — 143 tests, no Windows needed:
+**Core runs on Linux, for real** — 160 tests, no Windows needed:
 
 ```bash
 cd dotnet && dotnet test ClipBridge.Core.Tests/ClipBridge.Core.Tests.csproj

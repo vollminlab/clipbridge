@@ -152,6 +152,45 @@ jobs:
           # the assertions above already inspected and accepted.
           exit 0
 
+      # The resident run above registered the Run value and the Add/Remove
+      # Programs entry; asserting they exist is the only proof Register() works.
+      # Then --uninstall runs from a COPY, because it deletes its own exe and the
+      # original still has to be uploaded below. --quiet is mandatory here: without
+      # it a run with no console shows a MessageBox and the step hangs forever.
+      - name: --uninstall smoke test
+        working-directory: dotnet
+        run: |
+          $uninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\clipbridge'
+          $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+          $entry = Get-ItemProperty $uninstallKey -ErrorAction SilentlyContinue
+          if (-not $entry) { Write-Error "startup did not register $uninstallKey"; exit 1 }
+          if ($entry.UninstallString -notmatch '^".+\.exe" --uninstall$') {
+            Write-Error "unexpected UninstallString: $($entry.UninstallString)"; exit 1
+          }
+          if (-not (Get-ItemProperty $runKey -Name clipbridge -ErrorAction SilentlyContinue)) {
+            Write-Error "startup did not register the Run value"; exit 1
+          }
+
+          $dir = Join-Path $env:RUNNER_TEMP 'clipbridge-uninstall'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          Copy-Item .\ClipBridge.App\bin\Release\net10.0-windows\win-x64\publish\ClipBridge.App.exe $dir
+          $copy = Join-Path $dir 'ClipBridge.App.exe'
+
+          $up = Start-Process -FilePath $copy -ArgumentList '--uninstall', '--quiet' -PassThru -Wait `
+                  -RedirectStandardOutput un-out.txt -RedirectStandardError un-err.txt
+          Get-Content un-out.txt, un-err.txt -ErrorAction SilentlyContinue
+          if ($up.ExitCode -ne 0) { Write-Error "--uninstall exited $($up.ExitCode)"; exit 1 }
+
+          if (Test-Path $uninstallKey) { Write-Error "Add/Remove Programs entry still present"; exit 1 }
+          if (Get-ItemProperty $runKey -Name clipbridge -ErrorAction SilentlyContinue) {
+            Write-Error "Run value still present"; exit 1
+          }
+
+          # Self-delete is a detached cmd.exe waiting ~2s for the process to exit.
+          Start-Sleep -Seconds 8
+          if (Test-Path $dir) { Write-Error "$dir was not removed after uninstall"; exit 1 }
+          Write-Host "--uninstall removed both registry entries, the exe and its folder"
+
       # Without this the binary is built on an ephemeral runner and destroyed with
       # it - there is no other way to get clipbridge.exe onto the laptop, because
       # NativeAOT cannot cross-compile from Linux (measured: "Cross-OS native

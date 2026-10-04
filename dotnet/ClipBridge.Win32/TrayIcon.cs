@@ -68,6 +68,20 @@ public sealed class TrayIcon : IDisposable
     // queues WM_APP_REHOOK onto this window's message loop (the real pump,
     // in Program.Main) and returns immediately - cheap and thread-safe -
     // so the actual Rehook() call happens on WndProc, on the pump thread.
+    // Asks every running instance to exit the way the tray's Exit item does,
+    // so each one unhooks and removes its icon itself. Returns how many were
+    // asked; the caller waits on the processes, not on this.
+    public static int RequestExitOfRunningInstances()
+    {
+        var asked = 0;
+        var hwnd = IntPtr.Zero;
+        while ((hwnd = NativeMethods.FindWindowExW(IntPtr.Zero, hwnd, ClassName, null)) != IntPtr.Zero)
+        {
+            if (NativeMethods.PostMessageW(hwnd, NativeMethods.WM_CLOSE, IntPtr.Zero, IntPtr.Zero)) asked++;
+        }
+        return asked;
+    }
+
     public void RequestRehook() => NativeMethods.PostMessageW(_hwnd, WM_APP_REHOOK, IntPtr.Zero, IntPtr.Zero);
 
     public void Create()
@@ -147,6 +161,15 @@ public sealed class TrayIcon : IDisposable
         if (msg == WM_APP_REHOOK)
         {
             _onRehook?.Invoke();
+            return IntPtr.Zero;
+        }
+        // Sent by another process's --uninstall. Routed through the same
+        // onExit as the tray's Exit item rather than DefWindowProc's default
+        // DestroyWindow, which would remove the window and leave the process
+        // (and its keyboard hook) running headless.
+        if (msg == NativeMethods.WM_CLOSE)
+        {
+            _onExit();
             return IntPtr.Zero;
         }
         if (msg == NativeMethods.WM_COMMAND)
