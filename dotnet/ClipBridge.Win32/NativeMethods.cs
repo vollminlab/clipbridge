@@ -239,6 +239,22 @@ internal static partial class NativeMethods
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool PostMessageW(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
 
+    // --- --uninstall ---
+    // Finds the tray windows of OTHER running instances so uninstall can ask
+    // them to exit (WM_CLOSE) before deleting the registry entries they
+    // rewrite on every startup. Not a message-only window (no HWND_MESSAGE
+    // parent), so a top-level FindWindowEx walk sees it.
+    [LibraryImport("user32.dll", EntryPoint = "FindWindowExW", StringMarshalling = StringMarshalling.Utf16)]
+    public static partial IntPtr FindWindowExW(IntPtr hWndParent, IntPtr hWndChildAfter, string? lpszClass, string? lpszWindow);
+
+    // Uninstall launched from Settings > Apps has no console to print to.
+    [LibraryImport("user32.dll", EntryPoint = "MessageBoxW", StringMarshalling = StringMarshalling.Utf16)]
+    public static partial int MessageBoxW(IntPtr hWnd, string lpText, string lpCaption, uint uType);
+
+    public const uint MB_ICONINFORMATION = 0x00000040;
+    public const uint MB_ICONWARNING = 0x00000030;
+    public const int WM_CLOSE = 0x0010;
+
     // --- tray icon (Task 18) ---
     public const int WM_COMMAND = 0x0111;
     public const int WM_RBUTTONUP = 0x0205;

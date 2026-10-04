@@ -108,11 +108,8 @@ public static class InstallCommand
                 return;
             }
 
-            var startMenu = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "Microsoft", "Windows", "Start Menu", "Programs");
-            Directory.CreateDirectory(startMenu);
-            var lnk = Path.Combine(startMenu, "clipbridge.lnk");
+            var lnk = UninstallCommand.StartMenuShortcutPath();
+            Directory.CreateDirectory(Path.GetDirectoryName(lnk)!);
 
             var script =
                 "$s = (New-Object -ComObject WScript.Shell).CreateShortcut('" + lnk.Replace("'", "''") + "'); " +

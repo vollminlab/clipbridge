@@ -15,10 +15,15 @@ public static class Program
             return InstallCommand.Run(Console.Out);
         }
 
+        if (args.Contains("--uninstall"))
+        {
+            return Uninstall(quiet: args.Contains("--quiet"));
+        }
+
         var configDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "clipbridge");
         Directory.CreateDirectory(configDir);
 
-        RegisterStartup();
+        Registration.Register();
 
         var clipboard = new Win32Clipboard();
         var pasteSink = new Win32PasteSink();
@@ -148,14 +153,24 @@ public static class Program
         }
     }
 
-    private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
-
-    // Registry Run key, not a Startup-folder .lnk shortcut (design decision
-    // #6) - one file, no shortcut to keep in sync with the exe's path.
-    private static void RegisterStartup()
+    // Run from a terminal, the result prints there like --install. Run from
+    // Settings > Apps there is no parent console, so without a dialog the
+    // uninstall would finish (or fail) in total silence. --quiet (the
+    // registered QuietUninstallString, and CI) suppresses the dialog, which
+    // would otherwise block an unattended run forever.
+    private static int Uninstall(bool quiet)
     {
-        using var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(RunKeyPath);
-        var exePath = Environment.ProcessPath ?? throw new InvalidOperationException("could not determine exe path");
-        key.SetValue("clipbridge", $"\"{exePath}\"");
+        var hasConsole = NativeMethods.AttachConsole(NativeMethods.ATTACH_PARENT_PROCESS);
+        var report = new StringWriter();
+        var code = UninstallCommand.Run(report);
+        Console.Out.Write(report.ToString());
+        Console.Out.Flush();
+
+        if (!hasConsole && !quiet)
+        {
+            NativeMethods.MessageBoxW(IntPtr.Zero, report.ToString(), "clipbridge",
+                code == 0 ? NativeMethods.MB_ICONINFORMATION : NativeMethods.MB_ICONWARNING);
+        }
+        return code;
     }
 }

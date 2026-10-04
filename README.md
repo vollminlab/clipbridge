@@ -38,6 +38,8 @@ somewhere stable, then:
 ```
 
 Then launch **clipbridge** from the Start Menu. It sits in the tray; there is no window.
+It also appears in **Settings > Apps**, which is how to uninstall it (or run
+`.\ClipBridge.App.exe --uninstall`).
 
 On the Linux side, `linux/install.sh` puts the receiver in `~/.local/bin` and prints a
 command to verify it.
