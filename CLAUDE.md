@@ -32,7 +32,7 @@ shellcheck -s sh linux/clipbridge-recv linux/clipbridge-recv_test.sh linux/insta
 
 ## Testing (dotnet/)
 
-**Core runs on Linux, for real** — 160 tests, no Windows needed:
+**Core runs on Linux, for real** — 168 tests, no Windows needed:
 
 ```bash
 cd dotnet && dotnet test ClipBridge.Core.Tests/ClipBridge.Core.Tests.csproj
@@ -205,6 +205,18 @@ explicitly wherever the rendered text is load-bearing. The subtle part: the *tes
 the same culture-sensitive way, so implementation and tests varied together and agreed by
 accident — the suite stayed green under every locale while the on-disk format changed. Pinning
 only the implementation is what exposed it.
+
+**17. An elevated window's keystrokes never reach a standard-user low-level hook.** UIPI drops
+them before `HookCallback` runs, so with Windows Terminal "Run as administrator" and clipbridge
+not elevated, `Ctrl+V` passes straight through to a terminal holding an image-only clipboard:
+nothing pastes, nothing is swallowed, **nothing is logged**. It went unnoticed for a month
+(2026-09 → 10-04). The hook cannot report what it is never shown, so `Program.cs` polls the
+foreground window every 2s and warns once per terminal process (log + balloon). The balloon
+uses its own `NOTIFYICONDATA_BALLOON` at exactly V2 size (952) rather than resizing the V1
+struct `NIM_ADD` depends on — see #13.
+
+A useful tell when triaging "it does nothing": the log prunes lines older than 7 days **on every
+write**, so a log whose newest lines are weeks old proves no code path that logs has run since.
 
 ### The pattern behind 8-14
 

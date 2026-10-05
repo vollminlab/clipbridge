@@ -398,6 +398,68 @@ internal static partial class NativeMethods
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool Shell_NotifyIconW(uint dwMessage, ref NOTIFYICONDATA lpData);
 
+    // --- balloon notification (elevation warning) ---
+    // A balloon needs szInfo/szInfoTitle/dwInfoFlags, which the V1 struct
+    // above deliberately omits. Rather than resize the struct NIM_ADD has been
+    // proven with (gotcha #13), the balloon gets its own struct sized to
+    // exactly NOTIFYICONDATAW_V2_SIZE = 952 on x64, sent only with NIM_MODIFY.
+    // Layout per shellapi.h, through dwInfoFlags; the uTimeout/uVersion union
+    // is a single uint. Size is asserted by NotifyIconBalloonDataTests.
+    public const uint NIM_MODIFY = 0x00000001;
+    public const uint NIF_INFO = 0x00000010;
+    public const uint NIIF_WARNING = 0x00000002;
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct NOTIFYICONDATA_BALLOON
+    {
+        public int cbSize;
+        public IntPtr hWnd;
+        public int uID;
+        public uint uFlags;
+        public uint uCallbackMessage;
+        public IntPtr hIcon;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string szTip;
+        public uint dwState;
+        public uint dwStateMask;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)] public string szInfo;
+        public uint uTimeoutOrVersion;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string szInfoTitle;
+        public uint dwInfoFlags;
+    }
+
+    public const int NOTIFYICONDATAW_V2_SIZE = 952;
+
+    [DllImport("shell32.dll", EntryPoint = "Shell_NotifyIconW", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool Shell_NotifyIconBalloonW(uint dwMessage, ref NOTIFYICONDATA_BALLOON lpData);
+
+    // --- process elevation (elevation warning) ---
+    public const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+    public const uint TOKEN_QUERY = 0x0008;
+    public const int TokenElevation = 20;
+    public const int ERROR_ACCESS_DENIED = 5;
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    public static partial IntPtr OpenProcess(uint dwDesiredAccess, [MarshalAs(UnmanagedType.Bool)] bool bInheritHandle, uint dwProcessId);
+
+    [LibraryImport("kernel32.dll")]
+    public static partial IntPtr GetCurrentProcess();
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool CloseHandle(IntPtr hObject);
+
+    [LibraryImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool OpenProcessToken(IntPtr processHandle, uint desiredAccess, out IntPtr tokenHandle);
+
+    // TOKEN_ELEVATION is a single DWORD (TokenIsElevated), so a uint out
+    // parameter is the whole struct.
+    [LibraryImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool GetTokenInformation(IntPtr tokenHandle, int tokenInformationClass,
+        out uint tokenInformation, uint tokenInformationLength, out uint returnLength);
+
     [LibraryImport("user32.dll")]
     public static partial IntPtr CreatePopupMenu();
 

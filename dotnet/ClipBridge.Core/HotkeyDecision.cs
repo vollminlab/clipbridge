@@ -7,6 +7,10 @@ namespace ClipBridge.Core;
 // Windows.
 public static class HotkeyDecision
 {
+    // Shared with ElevationWarningPolicy, so the warning can never cover a
+    // different set of windows than the hook does.
+    public static readonly IReadOnlyCollection<string> TerminalProcessNames = new[] { "WindowsTerminal" };
+
     public static bool IsForegroundTerminal(string? processName, IReadOnlyCollection<string> terminalProcessNames) =>
         processName is not null && terminalProcessNames.Contains(processName);
 
