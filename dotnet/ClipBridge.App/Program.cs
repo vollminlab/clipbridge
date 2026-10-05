@@ -97,6 +97,52 @@ public static class Program
         // which runs on the real message-pump thread below.
         using var watchdog = new Timer(_ => tray.RequestRehook(), null, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(5));
 
+        // Elevation watch: polls the foreground window every 2s and warns
+        // (log + balloon, once per terminal process) when Windows Terminal is
+        // elevated and clipbridge is not. UIPI hides that window's keystrokes
+        // from the hook, so Ctrl+V there pastes nothing and nothing is logged;
+        // the hook cannot report a keystroke it is never shown, which is why
+        // this polls instead. Found 2026-10-04 after a month of silent failure.
+        //
+        // Thread-pool timer, deliberately not the pump: OpenProcess and the
+        // log write must never block the thread servicing the hook. Every
+        // exception is caught because an unhandled one on a thread-pool
+        // thread terminates the process - and with it the user's Ctrl+V.
+        var selfElevated = ProcessElevationProbe.IsCurrentProcessElevated();
+        var elevationPolicy = new ElevationWarningPolicy();
+        var elevationCheckRunning = 0;
+        string? lastElevationError = null;
+        using var elevationWatch = new Timer(_ =>
+        {
+            // Skip a tick rather than overlap: the policy is not thread-safe.
+            if (Interlocked.Exchange(ref elevationCheckRunning, 1) == 1) return;
+            try
+            {
+                if (!ProcessElevationProbe.TryGetForeground(out var pid, out var name, out var elevation)) return;
+                var warning = elevationPolicy.Evaluate(selfElevated, name, pid, elevation);
+                if (warning is null) return;
+                ClipbridgeLogger.Append(configDir, warning);
+                if (!tray.ShowWarning("clipbridge can't see this terminal", warning))
+                {
+                    ClipbridgeLogger.Append(configDir, "elevation warning balloon was not shown (Shell_NotifyIcon returned FALSE)");
+                }
+            }
+            catch (Exception ex)
+            {
+                // Losing one tick is harmless, but say why - and only when the
+                // reason changes, or a persistent fault writes a line every 2s.
+                if (ex.Message != lastElevationError)
+                {
+                    lastElevationError = ex.Message;
+                    try { ClipbridgeLogger.Append(configDir, $"elevation check failed - {ex.Message}"); } catch (Exception) { }
+                }
+            }
+            finally
+            {
+                Volatile.Write(ref elevationCheckRunning, 0);
+            }
+        }, null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+
         // Raw Win32 message pump - required for the low-level hook AND the
         // tray window's WndProc to receive messages. No
         // System.Windows.Forms.Application.Run: everything here is raw

@@ -15,8 +15,6 @@ namespace ClipBridge.Win32;
 // network, no await, ever.
 public sealed class KeyboardHook : IKeyboardHook
 {
-    private static readonly string[] TerminalProcessNames = { "WindowsTerminal" };
-
     private readonly IForegroundWindow _foregroundWindow;
     private readonly IClipboard _clipboard;
     private readonly Action<Action> _postToWorker;
@@ -132,7 +130,7 @@ public sealed class KeyboardHook : IKeyboardHook
                 bool forced = ctrlDown && shiftDown;
 
                 var processName = _foregroundWindow.GetForegroundProcessName();
-                bool inTerminal = HotkeyDecision.IsForegroundTerminal(processName, TerminalProcessNames);
+                bool inTerminal = HotkeyDecision.IsForegroundTerminal(processName, HotkeyDecision.TerminalProcessNames);
                 // Skip the clipboard call entirely when not in a terminal:
                 // it can never change the outcome (ShouldSwallow requires
                 // inTerminal), and it's one fewer Win32 call in the

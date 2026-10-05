@@ -84,6 +84,27 @@ public sealed class TrayIcon : IDisposable
 
     public void RequestRehook() => NativeMethods.PostMessageW(_hwnd, WM_APP_REHOOK, IntPtr.Zero, IntPtr.Zero);
 
+    // Shows a warning balloon (a toast on Windows 10/11). Safe to call from
+    // any thread: Shell_NotifyIcon has no thread affinity, it only messages
+    // Explorer. Returns false rather than throwing - a missed balloon must
+    // never take the process (and with it Ctrl+V) down, and the caller has
+    // already logged the same text.
+    public bool ShowWarning(string title, string text)
+    {
+        var nid = new NativeMethods.NOTIFYICONDATA_BALLOON
+        {
+            cbSize = Marshal.SizeOf<NativeMethods.NOTIFYICONDATA_BALLOON>(),
+            hWnd = _hwnd,
+            uID = (int)NotifyIconId,
+            uFlags = NativeMethods.NIF_INFO,
+            szTip = "clipbridge",
+            szInfo = text.Length > 255 ? text[..255] : text,
+            szInfoTitle = title.Length > 63 ? title[..63] : title,
+            dwInfoFlags = NativeMethods.NIIF_WARNING,
+        };
+        return NativeMethods.Shell_NotifyIconBalloonW(NativeMethods.NIM_MODIFY, ref nid);
+    }
+
     public void Create()
     {
         var hInstance = NativeMethods.GetModuleHandleW(null);
